@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env
+.env.*
+
+# eBugs dataset
+data/raw/
+data/processed/
+
+# Downloaded Java repositories
+repositories/
+repos/
+projects/
+
+# Generated results
+results/
+logs/
+tmp/
+temp/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Java build artifacts
+target/
+build/
+out/
+*.class
+
+# Python build artifacts
+dist/
+*.egg-info/
+
+# Model artifacts
+models/*.pt
+models/*.pth
+models/*.bin
+models/*.ckpt
+models/*.safetensors
