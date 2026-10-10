@@ -1,0 +1,11 @@
+# Maven build outputs
+**/target/
+
+# IDE settings and temporary files
+.idea/
+*.iml
+*.log
+
+# Local settings and secrets
+.env
+.env.*
