@@ -5,15 +5,23 @@ import com.github.javaparser.ParseResult;
 import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
 
+import java.util.Objects;
+
 public class JavaSourceParser {
 
     private final JavaParser parser;
 
     public JavaSourceParser() {
-        ParserConfiguration configuration = new ParserConfiguration()
-                .setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+        this(new ParserConfiguration()
+                .setLanguageLevel(
+                        ParserConfiguration.LanguageLevel.JAVA_17
+                ));
+    }
 
-        this.parser = new JavaParser(configuration);
+    public JavaSourceParser(ParserConfiguration configuration) {
+        this.parser = new JavaParser(
+                Objects.requireNonNull(configuration)
+        );
     }
 
     public CompilationUnit parse(String sourceCode) {
@@ -24,11 +32,14 @@ public class JavaSourceParser {
             );
         }
 
-        ParseResult<CompilationUnit> result = parser.parse(sourceCode);
+        ParseResult<CompilationUnit> result =
+                parser.parse(sourceCode);
 
-        if (!result.isSuccessful() || result.getResult().isEmpty()) {
+        if (!result.isSuccessful() ||
+                result.getResult().isEmpty()) {
             throw new IllegalArgumentException(
-                    "Failed to parse Java source: " + result.getProblems()
+                    "Failed to parse Java source: " +
+                            result.getProblems()
             );
         }
 

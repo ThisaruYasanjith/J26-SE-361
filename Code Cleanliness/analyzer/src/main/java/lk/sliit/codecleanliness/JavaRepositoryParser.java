@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public class JavaRepositoryParser {
 
@@ -23,31 +24,60 @@ public class JavaRepositoryParser {
             JavaRepositoryScanner scanner,
             JavaSourceParser parser) {
 
-        this.scanner = java.util.Objects.requireNonNull(scanner);
-        this.parser = java.util.Objects.requireNonNull(parser);
+        this.scanner = Objects.requireNonNull(scanner);
+        this.parser = Objects.requireNonNull(parser);
     }
 
     public RepositoryParseResult parseRepository(Path root)
             throws IOException {
 
-        List<Path> javaFiles = scanner.scan(root);
+        return parseFiles(root, parser);
+    }
 
-        Map<Path, CompilationUnit> parsed = new LinkedHashMap<>();
-        Map<Path, String> failures = new LinkedHashMap<>();
+    public RepositoryParseResult parseRepositoryWithSymbols(
+            Path root) throws IOException {
 
-        for (Path file : javaFiles) {
-            try {
-                String source = Files.readString(
-                        file, StandardCharsets.UTF_8
+        // Repository-specific symbol solver configuration.
+        RepositorySymbolResolver resolver =
+                new RepositorySymbolResolver(root);
+
+        JavaSourceParser symbolAwareParser =
+                new JavaSourceParser(
+                        resolver.createParserConfiguration()
                 );
 
-                CompilationUnit unit = parser.parse(source);
+        return parseFiles(root, symbolAwareParser);
+    }
+
+    private RepositoryParseResult parseFiles(
+            Path root,
+            JavaSourceParser activeParser) throws IOException {
+
+        List<Path> javaFiles = scanner.scan(root);
+
+        Map<Path, CompilationUnit> parsed =
+                new LinkedHashMap<>();
+
+        Map<Path, String> failures =
+                new LinkedHashMap<>();
+
+        for (Path file : javaFiles) {
+
+            try {
+                String source = Files.readString(
+                        file,
+                        StandardCharsets.UTF_8
+                );
+
+                CompilationUnit unit =
+                        activeParser.parse(source);
+
                 unit.setStorage(file);
 
                 parsed.put(file, unit);
 
             } catch (IOException | IllegalArgumentException ex) {
-                failures.put(file, ex.getMessage());
+                failures.put(file, ex.toString());
             }
         }
 
