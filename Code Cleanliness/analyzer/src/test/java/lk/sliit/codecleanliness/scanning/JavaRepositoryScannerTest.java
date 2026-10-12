@@ -1,4 +1,4 @@
-package lk.sliit.codecleanliness;
+package lk.sliit.codecleanliness.scanning;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

@@ -1,4 +1,10 @@
-package lk.sliit.codecleanliness;
+package lk.sliit.codecleanliness.analysis;
+
+import lk.sliit.codecleanliness.extraction.RepositoryRelationshipBuilder;
+import lk.sliit.codecleanliness.extraction.RepositoryStructureBuilder;
+import lk.sliit.codecleanliness.model.RepositoryAnalysisResult;
+import lk.sliit.codecleanliness.model.RepositoryParseResult;
+import lk.sliit.codecleanliness.parsing.JavaRepositoryParser;
 
 import java.io.IOException;
 import java.nio.file.Path;

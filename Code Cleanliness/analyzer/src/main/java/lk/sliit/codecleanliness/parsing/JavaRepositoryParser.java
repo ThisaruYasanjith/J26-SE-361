@@ -1,4 +1,7 @@
-package lk.sliit.codecleanliness;
+package lk.sliit.codecleanliness.parsing;
+
+import lk.sliit.codecleanliness.model.RepositoryParseResult;
+import lk.sliit.codecleanliness.scanning.JavaRepositoryScanner;
 
 import com.github.javaparser.ast.CompilationUnit;
 

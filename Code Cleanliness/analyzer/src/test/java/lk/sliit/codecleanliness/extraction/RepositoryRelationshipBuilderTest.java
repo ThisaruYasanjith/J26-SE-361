@@ -1,4 +1,8 @@
-package lk.sliit.codecleanliness;
+package lk.sliit.codecleanliness.extraction;
+
+import lk.sliit.codecleanliness.model.JavaRelationshipInfo;
+import lk.sliit.codecleanliness.model.RepositoryParseResult;
+import lk.sliit.codecleanliness.parsing.JavaRepositoryParser;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

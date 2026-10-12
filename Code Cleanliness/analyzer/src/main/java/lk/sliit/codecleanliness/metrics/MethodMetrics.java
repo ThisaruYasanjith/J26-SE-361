@@ -1,4 +1,4 @@
-package lk.sliit.codecleanliness;
+package lk.sliit.codecleanliness.metrics;
 
 public record MethodMetrics(
         String methodName,

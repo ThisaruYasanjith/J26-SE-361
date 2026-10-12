@@ -1,4 +1,4 @@
-package lk.sliit.codecleanliness;
+package lk.sliit.codecleanliness.parsing;
 
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;

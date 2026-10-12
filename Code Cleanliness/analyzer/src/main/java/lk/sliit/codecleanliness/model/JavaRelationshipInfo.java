@@ -1,4 +1,4 @@
-package lk.sliit.codecleanliness;
+package lk.sliit.codecleanliness.model;
 
 import java.nio.file.Path;
 

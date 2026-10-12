@@ -1,4 +1,4 @@
-package lk.sliit.codecleanliness;
+package lk.sliit.codecleanliness.scanning;
 
 import java.io.IOException;
 import java.nio.file.*;

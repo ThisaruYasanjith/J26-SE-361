@@ -1,4 +1,6 @@
-package lk.sliit.codecleanliness;
+package lk.sliit.codecleanliness.parsing;
+
+import lk.sliit.codecleanliness.model.RepositoryParseResult;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

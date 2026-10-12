@@ -1,4 +1,7 @@
-package lk.sliit.codecleanliness;
+package lk.sliit.codecleanliness.extraction;
+
+import lk.sliit.codecleanliness.model.JavaRelationshipInfo;
+import lk.sliit.codecleanliness.model.RepositoryParseResult;
 
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
