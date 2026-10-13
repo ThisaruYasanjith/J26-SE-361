@@ -1,0 +1,17 @@
+# Core Web UI
+streamlit>=1.36.0
+
+# HTTP and Ollama Integration
+requests>=2.31.0
+
+# Data Modeling and Validation
+pydantic>=2.7.0
+
+# Environment Configuration
+python-dotenv>=1.0.1
+
+# Java Parsing
+javalang>=0.13.0
+
+# Testing
+pytest>=8.2.0
