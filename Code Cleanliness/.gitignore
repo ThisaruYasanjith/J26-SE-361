@@ -9,3 +9,24 @@
 # Local settings and secrets
 .env
 .env.*
+
+# Research datasets (raw and processed)
+datasets/raw/*
+datasets/processed/*
+!datasets/raw/.gitkeep
+!datasets/processed/.gitkeep
+
+# LLM model weights and checkpoints
+llm/checkpoints/
+llm/models/
+llm/outputs/
+llm/runs/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Local experiment outputs
+evaluation/results/
+evaluation/reports/generated/
