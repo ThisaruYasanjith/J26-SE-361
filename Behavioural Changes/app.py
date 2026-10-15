@@ -4,9 +4,9 @@ Streamlit Demonstration Dashboard
 
 Stage: UI Feedback
 Integrates the full research pipeline:
-Java Method Input → Same-Signature Verification → LLM Semantic Analyzer →
+Java Method Input → Same-Signature Verification → LLM Semantic Analyzer (Groq Cloud) →
 Behavioral Fingerprinting → Behavioral Drift Engine → Impact Assessment →
-LLM Explanation → UI Feedback
+LLM Explanation (Groq Cloud) → UI Feedback
 """
 
 import streamlit as st
@@ -81,7 +81,7 @@ PRESET_CASES = {
     return String.format("Order #%s : $%.2f", orderId, amount);
 }""",
         "v2": """public String formatOrderReceipt(String orderId, double amount) {
-    // Drift: Throws NullPointerException instead of returning 'N/A'
+    // Drift: Throws IllegalArgumentException instead of returning 'N/A'
     if (orderId == null) {
         throw new IllegalArgumentException("orderId cannot be null");
     }
@@ -118,28 +118,56 @@ PRESET_CASES = {
 
 def main():
     st.title("🔍 Behavioral Drift Detection in Same-Signature Java Methods")
-    st.caption("Research Component | J26-SE-361 Code Governance Microservice")
+    st.caption("Research Component | J26-SE-361 Code Governance Microservice | Powered by Groq Cloud")
 
     # Sidebar: Configuration & LLM Health
     with st.sidebar:
-        st.header("⚙️ Configuration")
-        base_url = st.text_input("Ollama Base URL", value=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
-        model_name = st.text_input("Ollama Model", value=os.getenv("OLLAMA_MODEL", "codellama:7b"))
-        timeout = st.slider("Request Timeout (sec)", min_value=15, max_value=300, value=120)
+        st.header("⚡ Groq Cloud LLM")
+        
+        default_key = os.getenv("GROQ_API_KEY", "")
+        groq_api_key = st.text_input(
+            "Groq API Key",
+            value=default_key,
+            type="password",
+            help="Groq API Key (loaded from .env if present)"
+        )
+
+        groq_models = [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "llama-3.1-70b-versatile",
+            "mixtral-8x7b-32768",
+            "gemma2-9b-it"
+        ]
+        default_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        default_idx = groq_models.index(default_model) if default_model in groq_models else 0
+
+        model_name = st.selectbox(
+            "Groq Model",
+            options=groq_models,
+            index=default_idx,
+            help="Recommended: llama-3.3-70b-versatile for code and reasoning"
+        )
+
+        timeout = st.slider("Request Timeout (sec)", min_value=10, max_value=180, value=60)
         temp = st.slider("Temperature", min_value=0.0, max_value=1.0, value=0.1, step=0.05)
 
-        analyzer = LLMSemanticAnalyzer(base_url=base_url, model_name=model_name, timeout_seconds=timeout, temperature=temp)
-        
+        analyzer = LLMSemanticAnalyzer(
+            api_key=groq_api_key,
+            model_name=model_name,
+            timeout_seconds=timeout,
+            temperature=temp
+        )
+
         st.markdown("---")
-        st.subheader("Ollama Service Status")
-        if st.button("Check Ollama Connection"):
-            status = analyzer.check_connection()
-            if status.get("connected"):
-                st.success(f"Connected to Ollama at `{base_url}`")
-                models = status.get("available_models", [])
-                st.write("**Available Models:**", models if models else "None found")
-            else:
-                st.error(f"Could not connect: {status.get('error')}")
+        st.subheader("Groq API Status")
+        if st.button("Check Groq Connection"):
+            with st.spinner("Connecting to Groq Cloud..."):
+                status = analyzer.check_connection()
+                if status.get("connected"):
+                    st.success(f"Connected to Groq Cloud! Model `{model_name}` is available.")
+                else:
+                    st.error(f"Connection failed: {status.get('error')}")
 
         st.markdown("---")
         st.subheader("Load Preset Scenario")
@@ -171,7 +199,7 @@ def main():
     run_btn = st.button("🚀 Run Behavioral Drift Analysis Pipeline", type="primary", use_container_width=True)
 
     if run_btn:
-        pipeline_progress = st.status("Running Behavioral Drift Detection Pipeline...", expanded=True)
+        pipeline_progress = st.status("Running Behavioral Drift Detection Pipeline via Groq Cloud...", expanded=True)
 
         # STAGE 1: Method Parsing
         pipeline_progress.write("Stage 1: Parsing Java Methods (AST & Signature Extraction)...")
@@ -197,15 +225,15 @@ def main():
             return
 
         # STAGE 3 & 4: LLM Semantic Analysis & Behavioral Fingerprinting
-        pipeline_progress.write(f"Stage 3 & 4: Extracting Semantic Fingerprints via Ollama (`{model_name}`)...")
+        pipeline_progress.write(f"Stage 3 & 4: Extracting Semantic Fingerprints via Groq (`{model_name}`)...")
         try:
-            with st.spinner("Extracting behavioral fingerprints via Ollama..."):
+            with st.spinner("Extracting behavioral fingerprints via Groq Cloud..."):
                 fp1 = analyzer.extract_fingerprint(v1_parsed)
                 fp2 = analyzer.extract_fingerprint(v2_parsed)
         except Exception as e:
-            pipeline_progress.update(label="Ollama Connection Failed", state="error")
-            st.error(f"Failed to extract fingerprints from Ollama: {e}")
-            st.warning("Make sure Ollama is running (`ollama serve`) and model is pulled (`ollama pull codellama:7b`).")
+            pipeline_progress.update(label="Groq Analysis Failed", state="error")
+            st.error(f"Failed to extract fingerprints from Groq: {e}")
+            st.warning("Please verify your Groq API key in the sidebar or in the `.env` file.")
             return
 
         st.markdown("---")
@@ -294,10 +322,15 @@ def main():
                 st.markdown(f"- {m}")
 
         # STAGE 7: LLM Explanation
-        pipeline_progress.write("Stage 7: Generating Technical Narrative & Test Recommendations...")
-        explainer = ExplanationGenerator(base_url=base_url, model_name=model_name, timeout_seconds=timeout, temperature=temp)
+        pipeline_progress.write(f"Stage 7: Generating Technical Narrative & Test Recommendations via Groq (`{model_name}`)...")
+        explainer = ExplanationGenerator(
+            api_key=groq_api_key,
+            model_name=model_name,
+            timeout_seconds=timeout,
+            temperature=temp
+        )
         try:
-            with st.spinner("Synthesizing developer explanation via Ollama..."):
+            with st.spinner("Synthesizing developer explanation via Groq Cloud..."):
                 explanation = explainer.generate_explanation(v1_parsed, v2_parsed, sig_result, drift_report, impact)
         except Exception as e:
             st.warning(f"Could not generate deep LLM explanation: {e}")
