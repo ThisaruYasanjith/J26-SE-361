@@ -3,7 +3,7 @@ Module: explanation.py
 Stage: LLM Explanation
 
 Synthesizes technical findings across all pipeline stages into a clear, developer-facing
-narrative. Leverages the Ollama code LLM to produce deep semantic explanations,
+narrative. Leverages Groq Cloud LLM to produce deep semantic explanations,
 reproducing scenarios where same-signature drift manifests as runtime bugs.
 """
 
@@ -11,9 +11,9 @@ import os
 import json
 import logging
 from typing import Optional, List, Dict, Any
-import requests
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+from groq import Groq
 
 from src.method_parser import JavaMethod
 from src.signature_checker import SignatureComparisonResult
@@ -42,20 +42,22 @@ class ExplanationReport(BaseModel):
 
 class ExplanationGenerator:
     """
-    Prompts Ollama to generate cohesive, actionable explanations of same-signature drift.
+    Prompts Groq Cloud LLM to generate cohesive, actionable explanations of same-signature drift.
     """
 
     def __init__(
         self,
-        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
         model_name: Optional[str] = None,
-        timeout_seconds: int = 120,
-        temperature: float = 0.2
+        timeout_seconds: int = 60,
+        temperature: float = 0.2,
+        client: Optional[Any] = None
     ):
-        self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
-        self.model_name = model_name or os.getenv("OLLAMA_MODEL", "codellama:7b")
+        self.api_key = api_key or os.getenv("GROQ_API_KEY", "")
+        self.model_name = model_name or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
         self.timeout_seconds = int(os.getenv("REQUEST_TIMEOUT_SECONDS", str(timeout_seconds)))
         self.temperature = float(os.getenv("TEMPERATURE", str(temperature)))
+        self.client = client or (Groq(api_key=self.api_key) if self.api_key else None)
 
     def generate_explanation(
         self,
@@ -66,31 +68,41 @@ class ExplanationGenerator:
         impact: ImpactAssessment
     ) -> ExplanationReport:
         """
-        Queries Ollama to generate an in-depth explanatory narrative and JUnit test suggestions.
+        Queries Groq Cloud LLM to generate an in-depth explanatory narrative and JUnit test suggestions.
         """
+        if not self.api_key:
+            raise ConnectionError("GROQ_API_KEY is not configured.")
+
         prompt = self._build_explanation_prompt(v1, v2, sig_result, drift_report, impact)
-        payload = {
-            "model": self.model_name,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": self.temperature
-            }
-        }
+        client = self.client or Groq(api_key=self.api_key)
 
         try:
-            resp = requests.post(
-                f"{self.base_url}/api/generate",
-                json=payload,
+            completion = client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an expert senior Java architect and software governance researcher.\n"
+                            "Analyze behavioral drift between two versions of a Java method with identical signatures.\n"
+                            "You MUST return ONLY a valid JSON object matching the requested schema."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                response_format={"type": "json_object"},
+                temperature=self.temperature,
                 timeout=self.timeout_seconds
             )
-            resp.raise_for_status()
-            raw_text = resp.json().get("response", "")
+            raw_text = completion.choices[0].message.content or ""
             return self._parse_explanation_response(raw_text, drift_report, impact)
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error querying Ollama for explanation: {e}")
+        except Exception as e:
+            logger.error(f"Error querying Groq for explanation: {e}")
             raise ConnectionError(
-                f"Failed to query Ollama at {self.base_url} for explanation: {e}"
+                f"Failed to query Groq Cloud using model '{self.model_name}' for explanation: {e}"
             )
 
     def _build_explanation_prompt(
@@ -104,10 +116,9 @@ class ExplanationGenerator:
         """Creates the prompt guiding the LLM to explain the drift concisely and precisely."""
         flagged_areas = ", ".join(drift_report.flagged_drift_areas) or "None detected"
 
-        return f"""You are an expert senior Java architect and software governance researcher.
-Analyze this behavioral drift between two versions of a Java method with IDENTICAL method signatures:
+        return f"""Analyze this behavioral drift between two versions of a Java method with IDENTICAL method signatures:
 
-METHOD SIGNATURE (Identical in both versions):
+METHOD SIGNATURE:
 {v1.signature_str}
 
 BASELINE VERSION (v1):

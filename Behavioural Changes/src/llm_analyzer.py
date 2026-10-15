@@ -2,18 +2,17 @@
 Module: llm_analyzer.py
 Stage: LLM Semantic Analyzer & Behavioral Fingerprinting
 
-Connects to a local Ollama instance running a pretrained Code LLM (e.g. codellama,
-deepseek-coder, qwen2.5-coder) to extract structured behavioral fingerprints
-from Java method implementations.
+Connects to Groq Cloud API running high-performance open models (e.g. llama-3.3-70b-versatile,
+llama-3.1-8b-instant) to extract structured behavioral fingerprints from Java method implementations.
 """
 
 import os
 import json
 import logging
 from typing import List, Optional, Dict, Any
-import requests
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+from groq import Groq
 
 from src.method_parser import JavaMethod
 
@@ -62,83 +61,96 @@ class BehavioralFingerprint(BaseModel):
 
 class LLMSemanticAnalyzer:
     """
-    Interfaces with Ollama API to semantically analyze Java method behavior
+    Interfaces with Groq Cloud API to semantically analyze Java method behavior
     and produce standardized BehavioralFingerprint objects.
     """
 
     def __init__(
         self,
-        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
         model_name: Optional[str] = None,
-        timeout_seconds: int = 120,
-        temperature: float = 0.1
+        timeout_seconds: int = 60,
+        temperature: float = 0.1,
+        client: Optional[Any] = None
     ):
-        self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
-        self.model_name = model_name or os.getenv("OLLAMA_MODEL", "codellama:7b")
+        self.api_key = api_key or os.getenv("GROQ_API_KEY", "")
+        self.model_name = model_name or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
         self.timeout_seconds = int(os.getenv("REQUEST_TIMEOUT_SECONDS", str(timeout_seconds)))
         self.temperature = float(os.getenv("TEMPERATURE", str(temperature)))
+        self.client = client or (Groq(api_key=self.api_key) if self.api_key else None)
 
     def check_connection(self) -> Dict[str, Any]:
         """
-        Verifies connectivity to Ollama server and returns available models.
+        Verifies connectivity to Groq Cloud API and returns available models.
         """
-        try:
-            resp = requests.get(f"{self.base_url}/api/tags", timeout=5)
-            if resp.status_code == 200:
-                data = resp.json()
-                models = [m.get("name") for m in data.get("models", [])]
-                return {
-                    "connected": True,
-                    "available_models": models,
-                    "target_model_present": any(self.model_name in m for m in models),
-                    "base_url": self.base_url
-                }
+        if not self.api_key:
             return {
                 "connected": False,
-                "error": f"Ollama returned HTTP status {resp.status_code}",
-                "base_url": self.base_url
+                "error": "GROQ_API_KEY is not set. Please provide a valid Groq API key in your .env file or UI.",
+                "provider": "Groq Cloud"
             }
-        except requests.exceptions.RequestException as e:
+
+        try:
+            client = self.client or Groq(api_key=self.api_key)
+            models_resp = client.models.list()
+            available = [m.id for m in models_resp.data]
+            return {
+                "connected": True,
+                "available_models": available,
+                "target_model_present": any(self.model_name in m for m in available),
+                "model_name": self.model_name,
+                "provider": "Groq Cloud"
+            }
+        except Exception as e:
             return {
                 "connected": False,
                 "error": str(e),
-                "base_url": self.base_url
+                "model_name": self.model_name,
+                "provider": "Groq Cloud"
             }
 
     def extract_fingerprint(self, method: JavaMethod) -> BehavioralFingerprint:
         """
-        Prompts Ollama to extract the semantic behavioral fingerprint of a Java method.
+        Prompts Groq Cloud LLM to extract the semantic behavioral fingerprint of a Java method.
         """
+        if not self.api_key:
+            raise ConnectionError("GROQ_API_KEY is not configured.")
+
         prompt = self._build_fingerprint_prompt(method)
-        payload = {
-            "model": self.model_name,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": self.temperature
-            }
-        }
+        client = self.client or Groq(api_key=self.api_key)
 
         try:
-            resp = requests.post(
-                f"{self.base_url}/api/generate",
-                json=payload,
+            completion = client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an expert static analysis and formal methods assistant.\n"
+                            "Analyze the Java method and extract its precise semantic behavioral fingerprint.\n"
+                            "You MUST return ONLY a valid JSON object matching the requested schema."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                response_format={"type": "json_object"},
+                temperature=self.temperature,
                 timeout=self.timeout_seconds
             )
-            resp.raise_for_status()
-            result_json = resp.json()
-            raw_text = result_json.get("response", "")
+            raw_text = completion.choices[0].message.content or ""
             return self._parse_llm_json_response(method.name, raw_text)
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error communicating with Ollama: {e}")
+        except Exception as e:
+            logger.error(f"Error querying Groq: {e}")
             raise ConnectionError(
-                f"Failed to query Ollama at {self.base_url} using model '{self.model_name}': {e}"
+                f"Failed to query Groq Cloud using model '{self.model_name}': {e}"
             )
 
     def _build_fingerprint_prompt(self, method: JavaMethod) -> str:
         """Constructs a strict system prompt to elicit structured JSON behavioral analysis."""
-        return f"""You are an expert static analysis and formal methods assistant.
-Analyze the following Java method and extract its precise semantic behavioral fingerprint.
+        return f"""Analyze the following Java method and extract its precise semantic behavioral fingerprint.
 
 METHOD SIGNATURE:
 {method.signature_str}
@@ -148,8 +160,7 @@ METHOD IMPLEMENTATION:
 {method.raw_code}
 ```
 
-You MUST return ONLY a valid, raw JSON object (with no explanation outside JSON, no markdown backticks, no markdown formatting).
-Use this exact JSON schema:
+You MUST return ONLY a valid, raw JSON object with this exact schema:
 {{
   "preconditions": ["list of explicit or implicit assumptions and input validation checks"],
   "postconditions": ["list of guarantees about the return value or state upon normal completion"],
@@ -196,7 +207,6 @@ Use this exact JSON schema:
                 raw_llm_response=raw_text
             )
         except json.JSONDecodeError:
-            # Fallback when model produces unparsable text
             logger.warning("Failed to decode JSON from LLM output. Creating fallback fingerprint.")
             return BehavioralFingerprint(
                 method_name=method_name,

@@ -187,3 +187,68 @@ def test_impact_assessor():
     assert impact.risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL]
     assert len(impact.architectural_risks) > 0
     assert len(impact.recommended_mitigations) > 0
+
+
+def test_groq_llm_analyzer_json_parsing():
+    from src.llm_analyzer import LLMSemanticAnalyzer
+
+    analyzer = LLMSemanticAnalyzer(api_key="mock_key")
+    raw_json = """
+    ```json
+    {
+        "preconditions": ["price > 0"],
+        "postconditions": ["returns discounted price"],
+        "state_mutations": [],
+        "side_effects": [],
+        "exceptions_thrown": ["IllegalArgumentException"],
+        "return_behavior": "calculates percentage discount",
+        "invariants_and_assumptions": []
+    }
+    ```
+    """
+    fp = analyzer._parse_llm_json_response("calculateDiscount", raw_json)
+
+    assert fp.method_name == "calculateDiscount"
+    assert "price > 0" in fp.preconditions
+    assert "returns discounted price" in fp.postconditions
+    assert "IllegalArgumentException" in fp.exceptions_thrown
+    assert fp.return_behavior == "calculates percentage discount"
+
+
+def test_groq_explanation_json_parsing():
+    from src.explanation import ExplanationGenerator
+    from src.drift_engine import BehavioralDriftEngine, DriftSeverity
+    from src.impact_assessor import ImpactAssessor
+
+    explainer = ExplanationGenerator(api_key="mock_key")
+    fp = BehavioralFingerprint(
+        method_name="testMethod",
+        preconditions=[],
+        postconditions=[],
+        return_behavior="nominal"
+    )
+    drift = BehavioralDriftEngine().analyze(fp, fp)
+    from src.signature_checker import SignatureComparisonResult
+    sig_res = SignatureComparisonResult(
+        is_same_signature=True,
+        method_name="testMethod",
+        summary="Identical"
+    )
+    impact = ImpactAssessor().assess(sig_res, drift)
+
+    raw_json = """
+    {
+        "overview": "Logic changed slightly.",
+        "detailed_drift_breakdown": "Boundary shifted from 3 to 4.",
+        "failure_scenarios": ["Input 3 fails."],
+        "recommended_unit_tests": ["assertEquals(0.15, calc(100, 3));"],
+        "developer_guidance": "Check downstream callers."
+    }
+    """
+    report = explainer._parse_explanation_response(raw_json, drift, impact)
+
+    assert report.overview == "Logic changed slightly."
+    assert len(report.failure_scenarios) == 1
+    assert "Input 3 fails." in report.failure_scenarios[0]
+    assert len(report.recommended_unit_tests) == 1
+
