@@ -1,6 +1,9 @@
+
 package lk.sliit.codecleanliness.analysis;
 
+import lk.sliit.codecleanliness.detection.MethodDetectionThresholds;
 import lk.sliit.codecleanliness.model.JavaRelationshipInfo;
+import lk.sliit.codecleanliness.model.MaintainabilityConcern;
 import lk.sliit.codecleanliness.model.RepositoryAnalysisResult;
 
 import org.junit.jupiter.api.Test;
@@ -56,6 +59,7 @@ class RepositoryAnalyzerTest {
         assertEquals(2, result.parsedFiles());
         assertEquals(0, result.failedFiles());
         assertEquals(2, result.typeCount());
+        assertEquals(0, result.findingCount());
 
         assertTrue(result.types().stream().anyMatch(
                 type -> type.qualifiedName()
@@ -66,8 +70,7 @@ class RepositoryAnalyzerTest {
                 relationship ->
                         relationship.kind() ==
                         JavaRelationshipInfo.RelationshipKind.IMPLEMENTS
-                        && relationship.target()
-                        .equals("example.Worker")
+                        && relationship.target().equals("example.Worker")
                         && relationship.status() ==
                         JavaRelationshipInfo.ResolutionStatus.RESOLVED
         ));
@@ -106,5 +109,121 @@ class RepositoryAnalyzerTest {
                 .keySet().stream()
                 .anyMatch(path -> path.getFileName()
                         .toString().equals("Invalid.java")));
+    }
+
+    @Test
+    void shouldIntegrateConfiguredMethodDetectionAcrossFiles()
+            throws IOException {
+
+        Path src = Files.createDirectories(
+                tempDir.resolve("src/main/java/example")
+        );
+
+        Files.writeString(
+                src.resolve("First.java"),
+                """
+                package example;
+
+                public class First {
+                    public void run() {
+                        int a = 1;
+                        int b = 2;
+                        int c = 3;
+                    }
+                }
+                """
+        );
+
+        Files.writeString(
+                src.resolve("Second.java"),
+                """
+                package example;
+
+                public class Second {
+                    public void run(boolean a, boolean b) {
+                        if (a) {
+                            System.out.println("A");
+                        }
+                        if (b) {
+                            System.out.println("B");
+                        }
+                    }
+                }
+                """
+        );
+
+        RepositoryAnalysisResult result =
+                new RepositoryAnalyzer().analyze(
+                        tempDir,
+                        new MethodDetectionThresholds(2, 2)
+                );
+
+        assertEquals(2, result.parsedFiles());
+        assertEquals(2, result.typeCount());
+        assertTrue(result.findingCount() >= 2);
+
+        assertTrue(result.findings().stream().anyMatch(
+                finding ->
+                        finding.concern() ==
+                        MaintainabilityConcern.LONG_METHOD
+        ));
+
+        assertTrue(result.findings().stream().anyMatch(
+                finding ->
+                        finding.concern() ==
+                        MaintainabilityConcern.HIGH_COMPLEXITY
+        ));
+
+        assertTrue(result.findings().stream().allMatch(
+                finding ->
+                        Files.exists(finding.sourceFile())
+                        && finding.startLine() >= 1
+                        && finding.endLine() >= finding.startLine()
+        ));
+    }
+
+    @Test
+    void shouldContinueConfiguredDetectionWhenOneFileFails()
+            throws IOException {
+
+        Path src = Files.createDirectories(
+                tempDir.resolve("src/main/java/example")
+        );
+
+        Files.writeString(
+                src.resolve("Valid.java"),
+                """
+                package example;
+
+                public class Valid {
+                    public void process() {
+                        int a = 1;
+                        int b = 2;
+                        int c = 3;
+                    }
+                }
+                """
+        );
+
+        Files.writeString(
+                src.resolve("Invalid.java"),
+                "public class {"
+        );
+
+        RepositoryAnalysisResult result =
+                new RepositoryAnalyzer().analyze(
+                        tempDir,
+                        new MethodDetectionThresholds(2, 10)
+                );
+
+        assertEquals(2, result.totalFiles());
+        assertEquals(1, result.parsedFiles());
+        assertEquals(1, result.failedFiles());
+        assertEquals(1, result.findingCount());
+
+        assertEquals(
+                MaintainabilityConcern.LONG_METHOD,
+                result.findings().get(0).concern()
+        );
     }
 }
