@@ -3,7 +3,7 @@ Module: method_parser.py
 Stage: Java Method Input & Parsing
 
 Responsible for parsing raw Java method code into structured object models.
-Supports both isolated method snippets and full class-wrapped method declarations.
+Supports isolated method snippets, annotations, generics, and class-wrapped declarations.
 """
 
 from typing import List, Optional, Dict, Any
@@ -24,6 +24,7 @@ class JavaMethod(BaseModel):
     return_type: str
     parameters: List[MethodParameter] = Field(default_factory=list)
     modifiers: List[str] = Field(default_factory=list)
+    annotations: List[str] = Field(default_factory=list)
     thrown_exceptions: List[str] = Field(default_factory=list)
     body: str = ""
     docstring: Optional[str] = None
@@ -41,11 +42,15 @@ class MethodParser:
     """Parser to extract structured JavaMethod models from raw Java code strings."""
 
     def __init__(self):
+        # Regex to match annotations
+        self._annotation_pattern = re.compile(r"@\w+(?:\([^)]*\))?")
+        
         # Regex to match Java method declaration headers
         self._header_pattern = re.compile(
             r"(?:(/\*\*.*?\*/)\s*)?"  # Optional javadoc comment
+            r"((?:@\w+(?:\([^)]*\))?\s*)*)"  # Optional annotations
             r"((?:(?:public|protected|private|static|final|synchronized|abstract|default)\s+)*)"  # Modifiers
-            r"([\w<>\[\],\s]+?)\s+"  # Return type
+            r"([\w<>\[\],\s\?]+?)\s+"  # Return type (with generics)
             r"(\b[a-zA-Z_]\w*\b)\s*"  # Method name
             r"\(([^)]*)\)\s*"  # Parameters
             r"(?:throws\s+([^{;]+))?\s*"  # Throws clause
@@ -75,8 +80,12 @@ class MethodParser:
                     for param in ast_method.parameters
                 ]
                 return_type = "void" if ast_method.return_type is None else self._format_ast_type(ast_method.return_type)
-                modifiers = list(ast_method.modifiers)
+                modifiers = list(ast_method.modifiers) if ast_method.modifiers else []
                 throws = list(ast_method.throws) if ast_method.throws else []
+                annotations = [
+                    f"@{ann.name}" if not hasattr(ann, 'element') or not ann.element else f"@{ann.name}({ann.element})"
+                    for ann in (ast_method.annotations or [])
+                ]
 
                 return JavaMethod(
                     raw_code=cleaned_code,
@@ -84,9 +93,10 @@ class MethodParser:
                     return_type=return_type,
                     parameters=parameters,
                     modifiers=modifiers,
+                    annotations=annotations,
                     thrown_exceptions=throws,
                     body=self._extract_body(cleaned_code),
-                    docstring=None
+                    docstring=self._extract_docstring(cleaned_code)
                 )
         except Exception:
             # Fall back to regex parser
@@ -95,9 +105,24 @@ class MethodParser:
         return self._parse_regex(cleaned_code)
 
     def _format_ast_type(self, type_node: Any) -> str:
-        """Formats a javalang type node into a string type."""
+        """Formats a javalang type node into a string type, preserving sub_types, generics, and dimensions."""
         if hasattr(type_node, 'name'):
-            base = type_node.name
+            curr = type_node
+            names = []
+            while curr:
+                names.append(curr.name)
+                curr = getattr(curr, 'sub_type', None)
+            base = ".".join(names)
+            if hasattr(type_node, 'arguments') and type_node.arguments:
+                arg_strs = []
+                for arg in type_node.arguments:
+                    if hasattr(arg, 'type') and arg.type:
+                        arg_strs.append(self._format_ast_type(arg.type))
+                    elif hasattr(arg, 'pattern_type') and arg.pattern_type:
+                        arg_strs.append(str(arg.pattern_type))
+                    else:
+                        arg_strs.append(str(arg))
+                base += f"<{', '.join(arg_strs)}>"
             if hasattr(type_node, 'dimensions') and type_node.dimensions:
                 base += "[]" * len(type_node.dimensions)
             return base
@@ -107,7 +132,7 @@ class MethodParser:
         """Regex-based parser for isolated method snippets."""
         match = self._header_pattern.search(code)
         if not match:
-            # Provide sensible fallback rather than crashing
+            # Fallback for unconventional headers
             lines = code.strip().splitlines()
             first_line = lines[0] if lines else "unknownMethod()"
             return JavaMethod(
@@ -116,23 +141,26 @@ class MethodParser:
                 return_type="void",
                 parameters=[],
                 modifiers=[],
+                annotations=[],
                 thrown_exceptions=[],
                 body=self._extract_body(code)
             )
 
         docstring = match.group(1)
-        raw_modifiers = match.group(2) or ""
-        return_type = match.group(3).strip()
-        name = match.group(4).strip()
-        raw_params = match.group(5) or ""
-        raw_throws = match.group(6) or ""
+        raw_annotations = match.group(2) or ""
+        raw_modifiers = match.group(3) or ""
+        return_type = re.sub(r"\s+", " ", match.group(4).strip())
+        name = match.group(5).strip()
+        raw_params = match.group(6) or ""
+        raw_throws = match.group(7) or ""
 
+        annotations = [ann.strip() for ann in self._annotation_pattern.findall(raw_annotations)]
         modifiers = [m for m in raw_modifiers.split() if m]
         thrown_exceptions = [t.strip() for t in raw_throws.split(",") if t.strip()]
 
         parameters: List[MethodParameter] = []
         if raw_params.strip():
-            param_parts = [p.strip() for p in raw_params.split(",") if p.strip()]
+            param_parts = self._split_parameters(raw_params)
             for part in param_parts:
                 tokens = part.split()
                 if len(tokens) >= 2:
@@ -150,10 +178,37 @@ class MethodParser:
             return_type=return_type,
             parameters=parameters,
             modifiers=modifiers,
+            annotations=annotations,
             thrown_exceptions=thrown_exceptions,
             body=body,
             docstring=docstring
         )
+
+    def _split_parameters(self, raw_params: str) -> List[str]:
+        """Splits parameter string taking generic brackets into account."""
+        parts = []
+        current = []
+        depth = 0
+        for char in raw_params:
+            if char in "<[(":
+                depth += 1
+                current.append(char)
+            elif char in ">])":
+                depth -= 1
+                current.append(char)
+            elif char == "," and depth == 0:
+                parts.append("".join(current).strip())
+                current = []
+            else:
+                current.append(char)
+        if current:
+            parts.append("".join(current).strip())
+        return [p for p in parts if p]
+
+    def _extract_docstring(self, code: str) -> Optional[str]:
+        """Extracts javadoc docstring if present at beginning."""
+        match = re.match(r"\s*(/\*\*.*?\*/)", code, re.DOTALL)
+        return match.group(1).strip() if match else None
 
     def _extract_body(self, code: str) -> str:
         """Extracts content inside the outer curly braces of the method body."""
