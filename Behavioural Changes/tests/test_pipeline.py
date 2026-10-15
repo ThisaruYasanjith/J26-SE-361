@@ -32,6 +32,26 @@ def test_method_parser_snippet():
     assert "public" in method.modifiers
 
 
+def test_method_parser_with_annotations_and_generics():
+    code = """
+    @Override
+    @Deprecated
+    public List<String> processEntities(Map<String, Integer> mapping, String... tags) throws IOException, SQLException {
+        return new ArrayList<>();
+    }
+    """
+    parser = MethodParser()
+    method = parser.parse(code)
+
+    assert method.name == "processEntities"
+    assert "List<String>" in method.return_type
+    assert len(method.parameters) == 2
+    assert "Map<String, Integer>" in method.parameters[0].type
+    assert "tags" in method.parameters[1].name
+    assert "@Override" in method.annotations
+    assert "IOException" in method.thrown_exceptions
+
+
 def test_same_signature_checker_positive():
     v1_code = """
     public double calculateDiscount(double price, int customerTier) {
@@ -56,6 +76,20 @@ def test_same_signature_checker_positive():
     assert res.is_same_signature is True
     assert len(res.mismatches) == 0
     assert res.allows_drift_analysis is True
+
+
+def test_same_signature_checker_type_normalization():
+    v1_code = "public List<java.lang.String> fetchNames(java.lang.String query) { return null; }"
+    v2_code = "public List<String> fetchNames(String query) { return null; }"
+
+    parser = MethodParser()
+    checker = SignatureChecker()
+
+    v1 = parser.parse(v1_code)
+    v2 = parser.parse(v2_code)
+    res = checker.check(v1, v2)
+
+    assert res.is_same_signature is True
 
 
 def test_same_signature_checker_negative():
