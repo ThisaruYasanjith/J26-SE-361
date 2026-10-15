@@ -101,8 +101,8 @@ class SignatureChecker:
                 ))
 
         if self.strict_exceptions:
-            v1_exc = set(v1.thrown_exceptions)
-            v2_exc = set(v2.thrown_exceptions)
+            v1_exc = set(self._normalize_type(e) for e in v1.thrown_exceptions)
+            v2_exc = set(self._normalize_type(e) for e in v2.thrown_exceptions)
             if v1_exc != v2_exc:
                 mismatches.append(SignatureMismatch(
                     component="thrown_exceptions",
@@ -126,9 +126,11 @@ class SignatureChecker:
         )
 
     def _normalize_type(self, type_str: str) -> str:
-        """Removes redundant whitespace and canonicalizes basic type notations."""
+        """
+        Removes redundant whitespace and canonicalizes basic type notations,
+        including recursively within generics (e.g. java.lang.String -> String).
+        """
         cleaned = re.sub(r"\s+", "", type_str)
-        # Map common aliases if needed (e.g. java.lang.String to String)
-        if cleaned.startswith("java.lang."):
-            cleaned = cleaned.replace("java.lang.", "")
+        # Strip java.lang. prefixes across the type string
+        cleaned = re.sub(r"\bjava\.lang\.", "", cleaned)
         return cleaned
