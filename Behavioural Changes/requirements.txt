@@ -1,8 +1,9 @@
 # Core Web UI
 streamlit>=1.36.0
 
-# HTTP and Ollama Integration
+# HTTP and LLM Integration
 requests>=2.31.0
+groq>=0.9.0
 
 # Data Modeling and Validation
 pydantic>=2.7.0
