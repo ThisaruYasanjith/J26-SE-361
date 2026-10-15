@@ -1,7 +1,10 @@
+
 package lk.sliit.codecleanliness.extraction;
 
 import lk.sliit.codecleanliness.model.MethodUsageInfo;
 import lk.sliit.codecleanliness.parsing.JavaRepositoryParser;
+import lk.sliit.codecleanliness.metrics.CohesionMetrics;
+import lk.sliit.codecleanliness.metrics.CohesionMetricsCalculator;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -128,5 +131,113 @@ class MethodUsageExtractorTest {
 
         assertFalse(usages.get(0)
                 .accessedFields().contains("count"));
+    }
+
+    @Test
+    void shouldResolveOverloadedInternalMethodCalls()
+            throws IOException {
+
+        Path src = Files.createDirectories(
+                tempDir.resolve("src/main/java/example")
+        );
+
+        Files.writeString(
+                src.resolve("Account.java"),
+                """
+                package example;
+
+                public class Account {
+                    private int balance;
+
+                    public void update(int amount) {
+                        balance += amount;
+                    }
+
+                    public void update(String message) {
+                        update(10);
+                    }
+                }
+                """
+        );
+
+        var parsed = new JavaRepositoryParser()
+                .parseRepositoryWithSymbols(tempDir);
+
+        assertEquals(1, parsed.successfulFiles());
+
+        List<MethodUsageInfo> usages =
+                new MethodUsageExtractor().extract(parsed);
+
+        assertEquals(2, usages.size());
+
+        MethodUsageInfo caller = usages.stream()
+                .filter(method -> method.methodSignature()
+                        .equals("update(String)"))
+                .findFirst()
+                .orElseThrow();
+
+        assertTrue(
+                caller.calledMethods().contains(
+                        "example.Account.update(int)"
+                ),
+                "Internal overloaded call should resolve "
+                        + "to the correct target signature"
+        );
+
+        assertTrue(
+                caller.unresolvedReferences().isEmpty(),
+                "The test's internal method call should resolve"
+        );
+    }
+
+    @Test
+    void shouldConnectOverloadedMethodsInCohesionGraph()
+            throws IOException {
+
+        Path src = Files.createDirectories(
+                tempDir.resolve("src/main/java/example")
+        );
+
+        Files.writeString(
+                src.resolve("Account.java"),
+                """
+                package example;
+
+                public class Account {
+                    private int balance;
+
+                    public void update(int amount) {
+                        balance += amount;
+                    }
+
+                    public void update(String message) {
+                        update(10);
+                    }
+                }
+                """
+        );
+
+        var parsed = new JavaRepositoryParser()
+                .parseRepositoryWithSymbols(tempDir);
+
+        assertEquals(1, parsed.successfulFiles());
+
+        List<MethodUsageInfo> usages =
+                new MethodUsageExtractor().extract(parsed);
+
+        CohesionMetrics cohesion =
+                new CohesionMetricsCalculator().calculate(
+                        "example.Account",
+                        usages
+                );
+
+        assertEquals(2, cohesion.methodCount());
+
+        assertEquals(
+                1,
+                cohesion.lcom4(),
+                "An internal method call should connect "
+                        + "the two overloaded methods"
+        );
     }
 }
