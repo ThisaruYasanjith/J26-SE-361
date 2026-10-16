@@ -3,7 +3,6 @@ package lk.sliit.codecleanliness.triage;
 
 import lk.sliit.codecleanliness.analysis.RepositoryAnalyzer;
 import lk.sliit.codecleanliness.analysis.RepositoryDetectionConfig;
-
 import lk.sliit.codecleanliness.model.RepositoryAnalysisResult;
 
 import java.io.IOException;
@@ -14,40 +13,48 @@ import java.util.Objects;
 /**
  * Coordinates repository-wide maintainability triage.
  *
- * Current pipeline:
- * Detection -> Related-Issue Grouping -> Priority Ranking
+ * Pipeline:
+ * Detection -> Evidence-Aware Grouping -> Priority Ranking
  *
- * The detectors and preliminary triage algorithms remain
- * separately testable and independently configurable.
+ * Grouping supports exact-location and preliminary
+ * class-method contextual relationships.
+ *
+ * Detection thresholds and priority factors are
+ * preliminary and require empirical evaluation.
  */
 public class RepositoryTriageService {
 
     private final RepositoryAnalyzer analyzer;
-    private final RelatedIssueGrouper grouper;
+    private final EvidenceAwareIssueGrouper grouper;
     private final MaintainabilityPriorityRanker ranker;
 
     public RepositoryTriageService() {
         this(
                 new RepositoryAnalyzer(),
-                new RelatedIssueGrouper(),
+                new EvidenceAwareIssueGrouper(),
                 new MaintainabilityPriorityRanker()
         );
     }
 
     public RepositoryTriageService(
             RepositoryAnalyzer analyzer,
-            RelatedIssueGrouper grouper,
+            EvidenceAwareIssueGrouper grouper,
             MaintainabilityPriorityRanker ranker
     ) {
-        this.analyzer = Objects.requireNonNull(analyzer);
-        this.grouper = Objects.requireNonNull(grouper);
-        this.ranker = Objects.requireNonNull(ranker);
+        this.analyzer = Objects.requireNonNull(
+                analyzer, "Repository analyzer is required"
+        );
+        this.grouper = Objects.requireNonNull(
+                grouper, "Issue grouper is required"
+        );
+        this.ranker = Objects.requireNonNull(
+                ranker, "Priority ranker is required"
+        );
     }
 
     /**
-     * Runs a full repository-wide preliminary triage.
-     *
-     * All detection boundaries must be explicitly supplied.
+     * Performs preliminary maintainability triage over
+     * all Java files discovered in the repository.
      */
     public RepositoryTriageResult analyze(
             Path repositoryRoot,
@@ -55,10 +62,12 @@ public class RepositoryTriageService {
     ) throws IOException {
 
         Objects.requireNonNull(
-                repositoryRoot, "Repository path is required"
+                repositoryRoot,
+                "Repository root is required"
         );
         Objects.requireNonNull(
-                config, "Detection configuration is required"
+                config,
+                "Detection configuration is required"
         );
 
         RepositoryAnalysisResult analysis =
@@ -67,13 +76,13 @@ public class RepositoryTriageService {
         List<IssueGroup> groups =
                 grouper.group(analysis.findings());
 
-        List<RankedIssueGroup> ranked =
+        List<RankedIssueGroup> rankedGroups =
                 ranker.rank(groups);
 
         return new RepositoryTriageResult(
                 analysis,
                 groups,
-                ranked
+                rankedGroups
         );
     }
 }

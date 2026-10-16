@@ -152,6 +152,16 @@ class RepositoryTriageServiceTest {
                         .anyMatch(IssueGroup::containsRelatedFindings)
         );
 
+        assertTrue(
+                result.groups().stream()
+                        .anyMatch(group ->
+                                "CLASS_METHOD_CONTEXT".equals(
+                                        group.relationshipType()
+                                )),
+                "Expected an evidence-aware class-method group"
+        );
+
+
         for (int i = 0; i < result.rankedGroups().size(); i++) {
             RankedIssueGroup ranked =
                     result.rankedGroups().get(i);
