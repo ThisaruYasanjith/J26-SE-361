@@ -1,9 +1,14 @@
 """
-Dual-stream model for Java exception-handling defect detection.
+Dual-stream model for Java exception-handling defect detection
+with category holdout evaluation.
 
 Semantic stream: GraphCodeBERT -> 768-dim
 Structural stream: AST embedding + transformer -> 128-dim
 Fusion: concatenate -> MLP classifier -> 2 classes
+
+Category holdout: some categories are excluded from training but
+retained in validation and test. This tests generalization to
+defect types the model has never seen.
 
 Trains on data/processed/preprocessed.json and saves the best model
 to models/best_model.pt.
@@ -13,8 +18,6 @@ Works on CPU, CUDA (Colab), or Apple Silicon MPS.
 Run from project root:
     python src/07_train_model.py
 """
-
-
 
 from __future__ import annotations
 
@@ -34,9 +37,7 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import f1_score, precision_score, recall_score
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoModel, AutoTokenizer
-
-
+from transformers import AutoModel
 
 
 # ============================================================
@@ -51,10 +52,21 @@ HISTORY_PATH = PROJECT_ROOT / "results" / "training_history.csv"
 
 GCBERT_MODEL_NAME = "microsoft/graphcodebert-base"
 
+# ---------- Category Holdout ----------
+# These categories are EXCLUDED from training but retained
+# in validation and test. The model is tested on whether it can
+# detect defect categories it has never seen during training.
+HOLDOUT_CATEGORIES = [
+    "swallows_declared_exception",
+    "corrupted_state_on_exception",
+    "inconsistent_with_precheck",
+    "empty_catch",
+]
+
 # Model hyperparameters
-SEMANTIC_DIM = 768          # GraphCodeBERT pooler output
-AST_EMBED_DIM = 128         # AST token embedding dimension
-AST_HIDDEN_DIM = 128        # AST transformer output dimension
+SEMANTIC_DIM = 768
+AST_EMBED_DIM = 128
+AST_HIDDEN_DIM = 128
 AST_NUM_LAYERS = 2
 AST_NUM_HEADS = 4
 AST_FF_DIM = 512
@@ -103,16 +115,6 @@ def get_device() -> torch.device:
 # ============================================================
 
 class ExceptionDataset(Dataset):
-    """
-    Loads preprocessed records from memory.
-
-    Each item returns:
-        input_ids       (LongTensor, [512])
-        attention_mask  (LongTensor, [512])
-        ast_ids         (LongTensor, [256])
-        label           (LongTensor, scalar)
-    """
-
     def __init__(self, records: list[dict]):
         self.records = records
 
@@ -143,23 +145,15 @@ def collate_fn(batch):
 # ============================================================
 
 class DualStreamModel(nn.Module):
-    """
-    Semantic stream: GraphCodeBERT + pooler -> 768-dim
-    Structural stream: AST embedding + transformer -> 128-dim
-    Fusion: concatenate -> MLP -> 2 classes
-    """
-
     def __init__(self, ast_vocab_size: int):
         super().__init__()
 
-        # --- Semantic stream ---
         self.graphcodebert = AutoModel.from_pretrained(GCBERT_MODEL_NAME)
 
-        # --- Structural stream ---
         self.ast_embedding = nn.Embedding(
             num_embeddings=ast_vocab_size,
             embedding_dim=AST_EMBED_DIM,
-            padding_idx=0,   # ID 0 = <pad>
+            padding_idx=0,
         )
         self.ast_position_embedding = nn.Embedding(
             num_embeddings=256,
@@ -178,7 +172,6 @@ class DualStreamModel(nn.Module):
         )
         self.ast_projection = nn.Linear(AST_EMBED_DIM, AST_HIDDEN_DIM)
 
-        # --- Fusion + classifier ---
         fusion_input_dim = SEMANTIC_DIM + AST_HIDDEN_DIM
         self.classifier = nn.Sequential(
             nn.Linear(fusion_input_dim, FUSION_HIDDEN),
@@ -187,34 +180,22 @@ class DualStreamModel(nn.Module):
             nn.Linear(FUSION_HIDDEN, NUM_CLASSES),
         )
 
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        ast_ids: torch.Tensor,
-    ) -> torch.Tensor:
-        # --- Semantic stream ---
+    def forward(self, input_ids, attention_mask, ast_ids):
         gc_outputs = self.graphcodebert(
             input_ids=input_ids,
             attention_mask=attention_mask,
         )
-        semantic_vec = gc_outputs.pooler_output      # [batch, 768]
+        semantic_vec = gc_outputs.pooler_output
 
-        # --- Structural stream ---
-        ast_mask = (ast_ids == 0)                    # True where pad
+        ast_mask = (ast_ids == 0)
         B, L = ast_ids.shape
         positions = torch.arange(L, device=ast_ids.device).unsqueeze(0).expand(B, L)
         ast_emb = self.ast_embedding(ast_ids) + self.ast_position_embedding(positions)
-        ast_out = self.ast_transformer(
-            ast_emb,
-            src_key_padding_mask=ast_mask,
-        )
-        # Mean-pool over non-pad positions
-        mask_float = (~ast_mask).float().unsqueeze(-1)   # [B, L, 1]
+        ast_out = self.ast_transformer(ast_emb, src_key_padding_mask=ast_mask)
+        mask_float = (~ast_mask).float().unsqueeze(-1)
         pooled = (ast_out * mask_float).sum(dim=1) / mask_float.sum(dim=1).clamp(min=1.0)
-        structural_vec = self.ast_projection(pooled)     # [batch, 128]
+        structural_vec = self.ast_projection(pooled)
 
-        # --- Fusion ---
         combined = torch.cat([semantic_vec, structural_vec], dim=-1)
         logits = self.classifier(combined)
         return logits
@@ -235,11 +216,31 @@ def load_ast_vocab_size() -> int:
     return len(vocab)
 
 
-def split_by_field(records: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+def split_by_field(records: list[dict]):
     train = [r for r in records if r["split"] == "train"]
     val = [r for r in records if r["split"] == "val"]
     test = [r for r in records if r["split"] == "test"]
     return train, val, test
+
+
+def apply_holdout(train_records, val_records):
+    """
+    Remove HOLDOUT_CATEGORIES from the training set.
+    Split validation into seen and held-out subsets.
+    """
+    train_seen = [
+        r for r in train_records
+        if r["defect_category"] not in HOLDOUT_CATEGORIES
+    ]
+    val_seen = [
+        r for r in val_records
+        if r["defect_category"] not in HOLDOUT_CATEGORIES
+    ]
+    val_heldout = [
+        r for r in val_records
+        if r["defect_category"] in HOLDOUT_CATEGORIES
+    ]
+    return train_seen, val_seen, val_heldout
 
 
 # ============================================================
@@ -322,11 +323,6 @@ def evaluate(model, loader, criterion, device):
 # ============================================================
 
 def build_optimizer(model):
-    """
-    Differential learning rates:
-      - GraphCodeBERT params: LEARNING_RATE_GCBERT (small)
-      - All other params: LEARNING_RATE_OTHER (large)
-    """
     gcbert_params = list(model.graphcodebert.parameters())
     gcbert_param_ids = {id(p) for p in gcbert_params}
     other_params = [p for p in model.parameters() if id(p) not in gcbert_param_ids]
@@ -365,20 +361,36 @@ def main() -> int:
     ast_vocab_size = load_ast_vocab_size()
     print(f"  {len(records)} records, AST vocab size: {ast_vocab_size}\n")
 
-    train_records, val_records, test_records = split_by_field(records)
-    print(f"  train: {len(train_records)}")
-    print(f"  val:   {len(val_records)}")
-    print(f"  test:  {len(test_records)}\n")
+    train_all, val_all, test_records = split_by_field(records)
+    train_seen, val_seen, val_heldout = apply_holdout(train_all, val_all)
+
+    print(f"Category holdout:")
+    for cat in HOLDOUT_CATEGORIES:
+        print(f"  - {cat}")
+    print()
+    print(f"  train (all):                 {len(train_all)}")
+    print(f"  train (seen categories):     {len(train_seen)}")
+    print(f"  val (all):                   {len(val_all)}")
+    print(f"  val (seen categories):       {len(val_seen)}")
+    print(f"  val (held-out categories):   {len(val_heldout)}")
+    print(f"  test:                        {len(test_records)}")
+    print()
 
     # ---- Datasets and loaders ----
     train_loader = DataLoader(
-        ExceptionDataset(train_records),
+        ExceptionDataset(train_seen),
         batch_size=BATCH_SIZE,
         shuffle=True,
         collate_fn=collate_fn,
     )
-    val_loader = DataLoader(
-        ExceptionDataset(val_records),
+    val_seen_loader = DataLoader(
+        ExceptionDataset(val_seen),
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        collate_fn=collate_fn,
+    )
+    val_heldout_loader = DataLoader(
+        ExceptionDataset(val_heldout),
         batch_size=BATCH_SIZE,
         shuffle=False,
         collate_fn=collate_fn,
@@ -399,7 +411,8 @@ def main() -> int:
 
     # ---- Training loop ----
     print("Starting training...\n")
-    best_val_f1 = 0.0
+    best_heldout_f1 = 0.0
+    best_seen_f1_at_best = 0.0
     patience_counter = 0
     history = []
 
@@ -408,36 +421,48 @@ def main() -> int:
         train_loss, train_metrics = train_one_epoch(
             model, train_loader, optimizer, criterion, device, scheduler
         )
-        val_loss, val_metrics = evaluate(model, val_loader, criterion, device)
+        seen_loss, seen_metrics = evaluate(model, val_seen_loader, criterion, device)
+        heldout_loss, heldout_metrics = evaluate(
+            model, val_heldout_loader, criterion, device
+        )
         elapsed = time.time() - t0
 
         print(f"Epoch {epoch}/{EPOCHS}  ({elapsed:.1f}s)")
-        print(f"  train  loss={train_loss:.4f}  f1={train_metrics['f1']:.4f}")
-        print(f"  val    loss={val_loss:.4f}  f1={val_metrics['f1']:.4f}  "
-              f"prec={val_metrics['precision']:.4f}  rec={val_metrics['recall']:.4f}")
+        print(f"  train            loss={train_loss:.4f}  f1={train_metrics['f1']:.4f}")
+        print(f"  val (seen)       loss={seen_loss:.4f}  f1={seen_metrics['f1']:.4f}  "
+              f"prec={seen_metrics['precision']:.4f}  rec={seen_metrics['recall']:.4f}")
+        print(f"  val (held-out)   loss={heldout_loss:.4f}  f1={heldout_metrics['f1']:.4f}  "
+              f"prec={heldout_metrics['precision']:.4f}  rec={heldout_metrics['recall']:.4f}")
 
         history.append({
             "epoch": epoch,
             "train_loss": train_loss,
             "train_f1": train_metrics["f1"],
-            "val_loss": val_loss,
-            "val_f1": val_metrics["f1"],
-            "val_precision": val_metrics["precision"],
-            "val_recall": val_metrics["recall"],
+            "val_seen_loss": seen_loss,
+            "val_seen_f1": seen_metrics["f1"],
+            "val_seen_precision": seen_metrics["precision"],
+            "val_seen_recall": seen_metrics["recall"],
+            "val_heldout_loss": heldout_loss,
+            "val_heldout_f1": heldout_metrics["f1"],
+            "val_heldout_precision": heldout_metrics["precision"],
+            "val_heldout_recall": heldout_metrics["recall"],
         })
 
-        # Save best model
-        if val_metrics["f1"] > best_val_f1:
-            best_val_f1 = val_metrics["f1"]
+        # Save best model based on HELD-OUT F1
+        if heldout_metrics["f1"] > best_heldout_f1:
+            best_heldout_f1 = heldout_metrics["f1"]
+            best_seen_f1_at_best = seen_metrics["f1"]
             patience_counter = 0
             CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
             torch.save({
                 "model_state_dict": model.state_dict(),
                 "epoch": epoch,
-                "val_f1": val_metrics["f1"],
+                "val_heldout_f1": heldout_metrics["f1"],
+                "val_seen_f1": seen_metrics["f1"],
                 "ast_vocab_size": ast_vocab_size,
+                "holdout_categories": HOLDOUT_CATEGORIES,
             }, CHECKPOINT_PATH)
-            print(f"  -> saved best model (val_f1={best_val_f1:.4f})")
+            print(f"  -> saved best model (held-out f1={best_heldout_f1:.4f})")
         else:
             patience_counter += 1
             print(f"  -> no improvement ({patience_counter}/{EARLY_STOP_PATIENCE})")
@@ -456,7 +481,25 @@ def main() -> int:
     print(f"Wrote training history to {HISTORY_PATH.relative_to(PROJECT_ROOT)}")
 
     # ---- Final summary ----
-    print(f"\nBest validation F1: {best_val_f1:.4f}")
+    print()
+    print("=" * 60)
+    print("FINAL RESULTS")
+    print("=" * 60)
+    print(f"Best held-out validation F1:  {best_heldout_f1:.4f}")
+    print(f"Seen-category validation F1:  {best_seen_f1_at_best:.4f}")
+    print(f"Generalization gap:           {best_seen_f1_at_best - best_heldout_f1:.4f}")
+    print()
+    print(f"Interpretation:")
+    gap = best_seen_f1_at_best - best_heldout_f1
+    if gap < 0.10:
+        print("  Strong generalization — model learned abstract defect patterns.")
+    elif gap < 0.20:
+        print("  Moderate generalization — model partially relies on category features.")
+    elif gap < 0.35:
+        print("  Weak generalization — model relies on category-specific patterns.")
+    else:
+        print("  Poor generalization — model is mostly memorizing categories.")
+    print()
     print(f"Best model saved to: {CHECKPOINT_PATH.relative_to(PROJECT_ROOT)}")
 
     return 0
