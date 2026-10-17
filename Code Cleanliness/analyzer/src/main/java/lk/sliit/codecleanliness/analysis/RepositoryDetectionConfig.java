@@ -11,12 +11,14 @@ import lk.sliit.codecleanliness.detection.NamingDetectionConfig;
 import java.util.Objects;
 
 /**
- * Explicit preliminary maintainability detection settings.
+ * Explicit repository maintainability detection configuration.
  *
- * Optional duplication and naming checks must be enabled
- * by supplying their configurations.
+ * The five SOLID risk detectors are opt-in and report
+ * preliminary structural risk candidates, not verified
+ * SOLID violations.
  *
- * Existing four- and five-argument constructors are preserved.
+ * All existing 4-, 5- and 6-argument constructors
+ * remain supported.
  */
 public record RepositoryDetectionConfig(
         MethodDetectionThresholds methodThresholds,
@@ -24,21 +26,29 @@ public record RepositoryDetectionConfig(
         CohesionDetectionThresholds cohesionThresholds,
         GodClassDetectionThresholds godClassThresholds,
         DuplicateDetectionThresholds duplicateThresholds,
-        NamingDetectionConfig namingConfig
+        NamingDetectionConfig namingConfig,
+        boolean solidRisksEnabled
 ) {
 
     public RepositoryDetectionConfig {
         Objects.requireNonNull(
-                methodThresholds, "Method thresholds are required"
+                methodThresholds,
+                "Method thresholds are required"
         );
+
         Objects.requireNonNull(
-                classThresholds, "Class thresholds are required"
+                classThresholds,
+                "Class thresholds are required"
         );
+
         Objects.requireNonNull(
-                cohesionThresholds, "Cohesion thresholds are required"
+                cohesionThresholds,
+                "Cohesion thresholds are required"
         );
+
         Objects.requireNonNull(
-                godClassThresholds, "God Class thresholds are required"
+                godClassThresholds,
+                "God Class thresholds are required"
         );
     }
 
@@ -54,7 +64,8 @@ public record RepositoryDetectionConfig(
                 cohesionThresholds,
                 godClassThresholds,
                 null,
-                null
+                null,
+                false
         );
     }
 
@@ -71,7 +82,27 @@ public record RepositoryDetectionConfig(
                 cohesionThresholds,
                 godClassThresholds,
                 duplicateThresholds,
-                null
+                null,
+                false
+        );
+    }
+
+    public RepositoryDetectionConfig(
+            MethodDetectionThresholds methodThresholds,
+            ClassDetectionThresholds classThresholds,
+            CohesionDetectionThresholds cohesionThresholds,
+            GodClassDetectionThresholds godClassThresholds,
+            DuplicateDetectionThresholds duplicateThresholds,
+            NamingDetectionConfig namingConfig
+    ) {
+        this(
+                methodThresholds,
+                classThresholds,
+                cohesionThresholds,
+                godClassThresholds,
+                duplicateThresholds,
+                namingConfig,
+                false
         );
     }
 
