@@ -7,6 +7,7 @@ import lk.sliit.codecleanliness.detection.MethodDetectionThresholds;
 import lk.sliit.codecleanliness.detection.MethodMaintainabilityDetector;
 import lk.sliit.codecleanliness.detection.WeakCohesionDetector;
 import lk.sliit.codecleanliness.detection.DuplicatedLogicDetector;
+import lk.sliit.codecleanliness.detection.PoorNamingDetector;
 
 import lk.sliit.codecleanliness.extraction.RepositoryRelationshipBuilder;
 import lk.sliit.codecleanliness.extraction.RepositoryStructureBuilder;
@@ -45,6 +46,9 @@ public class RepositoryAnalyzer {
     private final WeakCohesionDetector cohesionDetector;
 
     private final GodClassDetector godClassDetector;
+
+    private final PoorNamingDetector poorNamingDetector =
+        new PoorNamingDetector();
 
     private final DuplicatedLogicDetector duplicatedLogicDetector =
         new DuplicatedLogicDetector();
@@ -241,6 +245,15 @@ public class RepositoryAnalyzer {
                 duplicatedLogicDetector.detect(
                         parsed,
                         config.duplicateThresholds()
+                )
+        );
+        }
+
+        if (config.namingDetectionEnabled()) {
+        findings.addAll(
+                poorNamingDetector.detect(
+                        parsed,
+                        config.namingConfig()
                 )
         );
         }
