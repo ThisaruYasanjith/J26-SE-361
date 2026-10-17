@@ -3,43 +3,54 @@ package lk.sliit.codecleanliness.analysis;
 
 import lk.sliit.codecleanliness.detection.ClassDetectionThresholds;
 import lk.sliit.codecleanliness.detection.CohesionDetectionThresholds;
+import lk.sliit.codecleanliness.detection.DuplicateDetectionThresholds;
 import lk.sliit.codecleanliness.detection.GodClassDetectionThresholds;
 import lk.sliit.codecleanliness.detection.MethodDetectionThresholds;
 
 import java.util.Objects;
 
 /**
- * Explicit configuration for the currently implemented
- * maintainability detectors.
+ * Explicit preliminary maintainability detection settings.
  *
- * All thresholds are preliminary and require validation.
+ * The four-argument constructor is preserved for existing
+ * callers. Duplication detection requires explicit opt-in
+ * through the five-argument constructor.
  */
 public record RepositoryDetectionConfig(
         MethodDetectionThresholds methodThresholds,
         ClassDetectionThresholds classThresholds,
         CohesionDetectionThresholds cohesionThresholds,
-        GodClassDetectionThresholds godClassThresholds
+        GodClassDetectionThresholds godClassThresholds,
+        DuplicateDetectionThresholds duplicateThresholds
 ) {
 
     public RepositoryDetectionConfig {
-        Objects.requireNonNull(
+        Objects.requireNonNull(methodThresholds);
+        Objects.requireNonNull(classThresholds);
+        Objects.requireNonNull(cohesionThresholds);
+        Objects.requireNonNull(godClassThresholds);
+    }
+
+    /**
+     * Previous configuration remains compatible.
+     * A null duplication configuration means disabled.
+     */
+    public RepositoryDetectionConfig(
+            MethodDetectionThresholds methodThresholds,
+            ClassDetectionThresholds classThresholds,
+            CohesionDetectionThresholds cohesionThresholds,
+            GodClassDetectionThresholds godClassThresholds
+    ) {
+        this(
                 methodThresholds,
-                "Method thresholds are required"
-        );
-
-        Objects.requireNonNull(
                 classThresholds,
-                "Class thresholds are required"
-        );
-
-        Objects.requireNonNull(
                 cohesionThresholds,
-                "Cohesion thresholds are required"
-        );
-
-        Objects.requireNonNull(
                 godClassThresholds,
-                "God Class thresholds are required"
+                null
         );
+    }
+
+    public boolean duplicateDetectionEnabled() {
+        return duplicateThresholds != null;
     }
 }

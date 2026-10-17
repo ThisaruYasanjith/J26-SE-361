@@ -6,6 +6,7 @@ import lk.sliit.codecleanliness.detection.GodClassDetector;
 import lk.sliit.codecleanliness.detection.MethodDetectionThresholds;
 import lk.sliit.codecleanliness.detection.MethodMaintainabilityDetector;
 import lk.sliit.codecleanliness.detection.WeakCohesionDetector;
+import lk.sliit.codecleanliness.detection.DuplicatedLogicDetector;
 
 import lk.sliit.codecleanliness.extraction.RepositoryRelationshipBuilder;
 import lk.sliit.codecleanliness.extraction.RepositoryStructureBuilder;
@@ -44,6 +45,9 @@ public class RepositoryAnalyzer {
     private final WeakCohesionDetector cohesionDetector;
 
     private final GodClassDetector godClassDetector;
+
+    private final DuplicatedLogicDetector duplicatedLogicDetector =
+        new DuplicatedLogicDetector();
 
     public RepositoryAnalyzer() {
         this(
@@ -231,6 +235,15 @@ public class RepositoryAnalyzer {
                         config.godClassThresholds()
                 )
         );
+
+        if (config.duplicateDetectionEnabled()) {
+        findings.addAll(
+                duplicatedLogicDetector.detect(
+                        parsed,
+                        config.duplicateThresholds()
+                )
+        );
+        }
 
         // Stable ordering makes results reproducible
         // independently of map traversal order.
