@@ -14,20 +14,36 @@ import java.util.Objects;
  * Coordinates repository-wide maintainability triage.
  *
  * Pipeline:
- * Detection -> Evidence-Aware Grouping -> Priority Ranking
  *
- * Grouping supports exact-location and preliminary
- * class-method contextual relationships.
+ * 1. Repository-wide maintainability detection
+ * 2. Evidence-aware exact-location and class-method grouping
+ * 3. Evidence-based cross-file duplicated logic grouping
+ * 4. Interpretable priority ranking
  *
- * Detection thresholds and priority factors are
- * preliminary and require empirical evaluation.
+ * Cross-file grouping currently supports identical
+ * normalized method-body fingerprints across Java files.
+ *
+ * It does not infer arbitrary cross-file dependencies
+ * or establish verified common root causes.
+ *
+ * Detection thresholds, grouping rules and priority
+ * factors remain preliminary and require empirical
+ * evaluation.
  */
 public class RepositoryTriageService {
 
     private final RepositoryAnalyzer analyzer;
+
     private final EvidenceAwareIssueGrouper grouper;
+
+    private final CrossFileDuplicateIssueGrouper crossFileGrouper =
+            new CrossFileDuplicateIssueGrouper();
+
     private final MaintainabilityPriorityRanker ranker;
 
+    /**
+     * Default constructor.
+     */
     public RepositoryTriageService() {
         this(
                 new RepositoryAnalyzer(),
@@ -36,25 +52,40 @@ public class RepositoryTriageService {
         );
     }
 
+    /**
+     * Preserved original constructor for existing tests
+     * and integrations.
+     */
     public RepositoryTriageService(
             RepositoryAnalyzer analyzer,
             EvidenceAwareIssueGrouper grouper,
             MaintainabilityPriorityRanker ranker
     ) {
         this.analyzer = Objects.requireNonNull(
-                analyzer, "Repository analyzer is required"
+                analyzer,
+                "Repository analyzer is required"
         );
+
         this.grouper = Objects.requireNonNull(
-                grouper, "Issue grouper is required"
+                grouper,
+                "Issue grouper is required"
         );
+
         this.ranker = Objects.requireNonNull(
-                ranker, "Priority ranker is required"
+                ranker,
+                "Priority ranker is required"
         );
     }
 
     /**
-     * Performs preliminary maintainability triage over
-     * all Java files discovered in the repository.
+     * Performs maintainability triage across all
+     * Java files discovered in the repository.
+     *
+     * The same analysis result is used throughout
+     * grouping and ranking.
+     *
+     * Every finding must appear exactly once in
+     * the final grouping result.
      */
     public RepositoryTriageResult analyze(
             Path repositoryRoot,
@@ -65,20 +96,35 @@ public class RepositoryTriageService {
                 repositoryRoot,
                 "Repository root is required"
         );
+
         Objects.requireNonNull(
                 config,
                 "Detection configuration is required"
         );
 
+        // Stage 1: Analyze the repository once.
         RepositoryAnalysisResult analysis =
                 analyzer.analyze(repositoryRoot, config);
 
-        List<IssueGroup> groups =
+        // Stage 2: Group findings by exact location
+        // and supported class-method relationships.
+        List<IssueGroup> contextualGroups =
                 grouper.group(analysis.findings());
 
+        // Stage 3: Identify cross-file duplicated logic
+        // through shared normalized body fingerprints.
+        //
+        // This stage preserves every original finding
+        // exactly once.
+        List<IssueGroup> groups =
+                crossFileGrouper.group(contextualGroups);
+
+        // Stage 4: Rank the resulting issue groups
+        // using the existing interpretable ranker.
         List<RankedIssueGroup> rankedGroups =
                 ranker.rank(groups);
 
+        // Preserve the existing result structure.
         return new RepositoryTriageResult(
                 analysis,
                 groups,
