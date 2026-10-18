@@ -3,7 +3,7 @@ import { DashboardProvider } from "./dashboardView";
 import { ArchitecturePanel } from "./architecture/architecturePanel";
 import { CodeQualityPanel } from "./codeQuality/codeQualityPanel";
 import { BehaviouralPanel } from "./behavioural/behaviouralPanel";
-import { RuntimePanel } from "./runtime/runtimePanel";
+import { ExceptionsPanel } from "./exceptions/exceptionsPanel";
 
 export function activate(context: vscode.ExtensionContext) {
   // Register sidebar buttons view
@@ -23,8 +23,8 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("analyzer.openBehavioural", () => {
       BehaviouralPanel.show(context);
     }),
-    vscode.commands.registerCommand("analyzer.openRuntime", () => {
-      RuntimePanel.show(context);
+    vscode.commands.registerCommand("analyzer.openExceptions", () => {
+      ExceptionsPanel.show(context);
     }),
   );
 }

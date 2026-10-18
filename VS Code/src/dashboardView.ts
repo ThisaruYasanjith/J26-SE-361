@@ -27,7 +27,7 @@ export class DashboardProvider implements vscode.TreeDataProvider<DashboardItem>
       new DashboardItem('Architecture', 'type-hierarchy', 'analyzer.openArchitecture', 'Launch Window'),
       new DashboardItem('Code Quality', 'checklist', 'analyzer.openCodeQuality', 'Launch Window'),
       new DashboardItem('Behavioural', 'pulse', 'analyzer.openBehavioural', 'Launch Window'),
-      new DashboardItem('Runtime Errors', 'bug', 'analyzer.openRuntime', 'Launch Window')
+      new DashboardItem('Exceptions', 'bug', 'analyzer.openExceptions', 'Launch Window')
     ]);
   }
 }

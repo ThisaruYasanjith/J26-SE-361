@@ -17,8 +17,8 @@ ui-prototype/
 │   │   └── codeQualityPanel.ts      # Member 2: Code quality & smells Webview
 │   ├── behavioural/
 │   │   └── behaviouralPanel.ts      # Member 3: Behavioural & concurrency Webview
-│   └── runtime/
-│       └── runtimePanel.ts          # Member 4: Runtime error Webview
+│   └── exceptions/
+│       └── exceptionsPanel.ts       # Member 4: Exceptions analysis Webview
 ├── .gitignore                       # Git ignore rules
 ├── .vscodeignore                   # Files excluded from the packaged extension
 ├── esbuild.js                       # esbuild bundler configuration script

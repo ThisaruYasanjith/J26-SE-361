@@ -45,8 +45,8 @@
         "title": "Open Behavioural Analysis"
       },
       {
-        "command": "analyzer.openRuntime",
-        "title": "Open Runtime Analysis"
+        "command": "analyzer.openExceptions",
+        "title": "Open Exceptions Analysis"
       }
     ]
   },
