@@ -1,17 +1,20 @@
 """
-Evaluate the trained dual-stream model on the test set.
-Compare with PMD and SpotBugs baselines.
+src/08b_evaluate_visual.py
 
-Loads:
-  models/best_model.pt
-  data/processed/preprocessed.json
-  data/processed/file_level_results.csv
+Visual evaluation: confusion matrices, bar charts, heatmaps, and ROC curves
+for PMD, SpotBugs, and the trained dual-stream model.
 
-Writes:
-  results/evaluation.csv
+Outputs:
+  results/figures/confusion_PMD.png
+  results/figures/confusion_SpotBugs.png
+  results/figures/confusion_Model.png
+  results/figures/comparison_bar.png
+  results/figures/per_category_heatmap.png
+  results/figures/roc_curves.png
+  results/figures/summary_metrics.csv
 
 Run from project root:
-    python src/08_evaluate.py
+    python src/08b_evaluate_visual.py
 """
 
 from __future__ import annotations
@@ -19,29 +22,30 @@ from __future__ import annotations
 import csv
 import json
 import sys
-from collections import Counter, defaultdict
+from collections import defaultdict
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 import torch
 import torch.nn as nn
-from sklearn.metrics import f1_score, matthews_corrcoef, precision_score, recall_score
+from sklearn.metrics import (
+    accuracy_score, confusion_matrix, f1_score, matthews_corrcoef,
+    precision_score, recall_score, roc_auc_score, roc_curve,
+)
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModel
 
-
-# ============================================================
-# CONFIG
-# ============================================================
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PREPROCESSED_PATH = PROJECT_ROOT / "data" / "processed" / "preprocessed.json"
-STATIC_ANALYSIS_PATH = PROJECT_ROOT / "data" / "processed" / "file_level_results.csv"
-CHECKPOINT_PATH = PROJECT_ROOT / "models" / "best_model.pt"
-OUTPUT_PATH = PROJECT_ROOT / "results" / "evaluation.csv"
+# Match 07_train_model.py architecture
+HOLDOUT_CATEGORIES = [
+    "swallows_declared_exception",
+    "corrupted_state_on_exception",
+    "inconsistent_with_precheck",
+    "empty_catch",
+]
 
 GCBERT_MODEL_NAME = "microsoft/graphcodebert-base"
-
 SEMANTIC_DIM = 768
 AST_EMBED_DIM = 128
 AST_HIDDEN_DIM = 128
@@ -50,34 +54,33 @@ AST_NUM_HEADS = 4
 AST_FF_DIM = 512
 FUSION_HIDDEN = 256
 NUM_CLASSES = 2
-
 BATCH_SIZE = 16
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PREPROCESSED_PATH = PROJECT_ROOT / "data" / "processed" / "preprocessed.json"
+STATIC_ANALYSIS_PATH = PROJECT_ROOT / "data" / "processed" / "file_level_results.csv"
+CHECKPOINT_PATH = PROJECT_ROOT / "models" / "best_model.pt"
+FIGURES_DIR = PROJECT_ROOT / "results" / "figures"
+SUMMARY_CSV = PROJECT_ROOT / "results" / "summary_metrics.csv"
+
+# Color palette
+COLOR_MODEL = "#2E86DE"      # strong blue
+COLOR_PMD = "#F39C12"        # orange
+COLOR_SPOTBUGS = "#E74C3C"   # red
+COLOR_GREEN = "#27AE60"      # green (correct)
+COLOR_RED = "#E74C3C"        # red (wrong)
+
 
 # ============================================================
-# DEVICE
-# ============================================================
-
-def get_device() -> torch.device:
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
-
-
-# ============================================================
-# DATASET
+# MODEL + DATASET
 # ============================================================
 
 class ExceptionDataset(Dataset):
-    def __init__(self, records: list[dict]):
+    def __init__(self, records):
         self.records = records
-
-    def __len__(self) -> int:
+    def __len__(self):
         return len(self.records)
-
-    def __getitem__(self, idx: int):
+    def __getitem__(self, idx):
         r = self.records[idx]
         return {
             "input_ids": torch.tensor(r["input_ids"], dtype=torch.long),
@@ -96,38 +99,18 @@ def collate_fn(batch):
     }
 
 
-# ============================================================
-# MODEL (must match 07_train_model.py)
-# ============================================================
-
 class DualStreamModel(nn.Module):
-    def __init__(self, ast_vocab_size: int):
+    def __init__(self, ast_vocab_size):
         super().__init__()
-
         self.graphcodebert = AutoModel.from_pretrained(GCBERT_MODEL_NAME)
-
-        self.ast_embedding = nn.Embedding(
-            num_embeddings=ast_vocab_size,
-            embedding_dim=AST_EMBED_DIM,
-            padding_idx=0,
-        )
-        self.ast_position_embedding = nn.Embedding(
-            num_embeddings=256,
-            embedding_dim=AST_EMBED_DIM,
-        )
+        self.ast_embedding = nn.Embedding(ast_vocab_size, AST_EMBED_DIM, padding_idx=0)
+        self.ast_position_embedding = nn.Embedding(256, AST_EMBED_DIM)
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=AST_EMBED_DIM,
-            nhead=AST_NUM_HEADS,
-            dim_feedforward=AST_FF_DIM,
-            dropout=0.1,
-            batch_first=True,
+            d_model=AST_EMBED_DIM, nhead=AST_NUM_HEADS,
+            dim_feedforward=AST_FF_DIM, dropout=0.1, batch_first=True,
         )
-        self.ast_transformer = nn.TransformerEncoder(
-            encoder_layer,
-            num_layers=AST_NUM_LAYERS,
-        )
+        self.ast_transformer = nn.TransformerEncoder(encoder_layer, num_layers=AST_NUM_LAYERS)
         self.ast_projection = nn.Linear(AST_EMBED_DIM, AST_HIDDEN_DIM)
-
         fusion_input_dim = SEMANTIC_DIM + AST_HIDDEN_DIM
         self.classifier = nn.Sequential(
             nn.Linear(fusion_input_dim, FUSION_HIDDEN),
@@ -137,12 +120,8 @@ class DualStreamModel(nn.Module):
         )
 
     def forward(self, input_ids, attention_mask, ast_ids):
-        gc_outputs = self.graphcodebert(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-        )
-        semantic_vec = gc_outputs.pooler_output
-
+        gc_out = self.graphcodebert(input_ids=input_ids, attention_mask=attention_mask)
+        semantic_vec = gc_out.pooler_output
         ast_mask = (ast_ids == 0)
         B, L = ast_ids.shape
         positions = torch.arange(L, device=ast_ids.device).unsqueeze(0).expand(B, L)
@@ -151,302 +130,297 @@ class DualStreamModel(nn.Module):
         mask_float = (~ast_mask).float().unsqueeze(-1)
         pooled = (ast_out * mask_float).sum(dim=1) / mask_float.sum(dim=1).clamp(min=1.0)
         structural_vec = self.ast_projection(pooled)
-
         combined = torch.cat([semantic_vec, structural_vec], dim=-1)
-        logits = self.classifier(combined)
-        return logits
+        return self.classifier(combined)
 
 
-# ============================================================
-# LOADERS
-# ============================================================
+def get_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
-def load_preprocessed() -> list[dict]:
-    with PREPROCESSED_PATH.open(encoding="utf-8") as f:
-        return json.load(f)
-
-
-def load_ast_vocab_size() -> int:
-    with (PROJECT_ROOT / "data" / "processed" / "ast_vocab.json").open(encoding="utf-8") as f:
-        vocab = json.load(f)
-    return len(vocab)
-
-
-def load_static_analysis() -> dict[str, dict]:
-    """Return a dict: filename → row (candidate_category_match, tools)."""
-    result = {}
-    with STATIC_ANALYSIS_PATH.open(encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            fn = row.get("filename", "").strip()
-            if fn:
-                result[fn] = row
-    return result
-
-
-# ============================================================
-# PREDICTION
-# ============================================================
 
 @torch.no_grad()
-def predict(model, loader, device):
+def predict_proba(model, loader, device):
     """
-    Return a dict: record_id → predicted_label (0 or 1)
+    Return list of dicts with keys:
+      label, pred, prob_defective
     """
     model.eval()
-    predictions = {}
-    current_idx = 0
+    results = []
     for batch in loader:
         input_ids = batch["input_ids"].to(device)
         attention_mask = batch["attention_mask"].to(device)
         ast_ids = batch["ast_ids"].to(device)
+        labels = batch["label"].cpu().numpy()
         logits = model(input_ids, attention_mask, ast_ids)
+        probs = torch.softmax(logits, dim=-1).cpu().numpy()
         preds = logits.argmax(dim=-1).cpu().numpy()
-        batch_size = preds.shape[0]
-        for i in range(batch_size):
-            predictions[current_idx] = int(preds[i])
-            current_idx += 1
-    return predictions
+        for i in range(len(labels)):
+            results.append({
+                "label": int(labels[i]),
+                "pred": int(preds[i]),
+                "prob_defective": float(probs[i][1]),
+            })
+    return results
 
 
 # ============================================================
 # METRICS
 # ============================================================
 
-def compute_metrics(y_true: list[int], y_pred: list[int]) -> dict:
-    if not y_true:
-        return {"precision": 0.0, "recall": 0.0, "f1": 0.0, "mcc": 0.0, "n": 0}
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-    return {
+def compute_full_metrics(y_true, y_pred, y_prob=None):
+    metrics = {
+        "accuracy": accuracy_score(y_true, y_pred),
         "precision": precision_score(y_true, y_pred, zero_division=0),
         "recall": recall_score(y_true, y_pred, zero_division=0),
         "f1": f1_score(y_true, y_pred, zero_division=0),
         "mcc": matthews_corrcoef(y_true, y_pred) if len(set(y_true)) > 1 else 0.0,
-        "n": len(y_true),
     }
+    if y_prob is not None and len(set(y_true)) > 1:
+        try:
+            metrics["roc_auc"] = roc_auc_score(y_true, y_prob)
+        except ValueError:
+            metrics["roc_auc"] = 0.0
+    else:
+        metrics["roc_auc"] = 0.0
+    return metrics
 
 
-def mcnemar_test(y_true, y_pred_a, y_pred_b):
-    """
-    McNemar's test comparing two classifiers on the same data.
-    y_true: ground truth labels
-    y_pred_a, y_pred_b: predictions from two methods
-    """
-    from scipy.stats import chi2
+# ============================================================
+# PLOTS
+# ============================================================
 
-    # n01: A wrong, B correct
-    # n10: A correct, B wrong
-    n01 = 0
-    n10 = 0
-    for t, a, b in zip(y_true, y_pred_a, y_pred_b):
-        a_correct = (a == t)
-        b_correct = (b == t)
-        if not a_correct and b_correct:
-            n01 += 1
-        elif a_correct and not b_correct:
-            n10 += 1
+def plot_confusion(y_true, y_pred, method_name, cmap, out_path):
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+    fig, ax = plt.subplots(figsize=(6, 5))
+    sns.heatmap(
+        cm, annot=True, fmt="d", cmap=cmap, cbar=False,
+        xticklabels=["Predicted Clean", "Predicted Defective"],
+        yticklabels=["Actual Clean", "Actual Defective"],
+        annot_kws={"size": 18, "weight": "bold"},
+        linewidths=1, linecolor="white", ax=ax,
+    )
+    ax.set_title(f"{method_name}\nConfusion Matrix", fontsize=14, fontweight="bold")
+    ax.set_xlabel("Predicted", fontsize=12)
+    ax.set_ylabel("Actual", fontsize=12)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
 
-    if n01 + n10 == 0:
-        return {"statistic": 0.0, "p_value": 1.0, "n01": n01, "n10": n10}
 
-    statistic = ((abs(n01 - n10) - 1) ** 2) / (n01 + n10)
-    p_value = 1 - chi2.cdf(statistic, df=1)
-    return {
-        "statistic": float(statistic),
-        "p_value": float(p_value),
-        "n01": n01,
-        "n10": n10,
-    }
+def plot_comparison_bar(all_metrics, out_path):
+    methods = list(all_metrics.keys())
+    metric_keys = ["accuracy", "precision", "recall", "f1", "mcc"]
+    metric_labels = ["Accuracy", "Precision", "Recall", "F1", "MCC"]
+    colors = [COLOR_PMD, COLOR_SPOTBUGS, COLOR_MODEL]
+
+    x = np.arange(len(metric_keys))
+    width = 0.25
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    for i, (method, metrics) in enumerate(all_metrics.items()):
+        values = [metrics.get(k, 0.0) for k in metric_keys]
+        bars = ax.bar(
+            x + i * width - width, values, width,
+            label=method, color=colors[i], edgecolor="white", linewidth=1,
+        )
+        for bar, val in zip(bars, values):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                    f"{val:.2f}", ha="center", va="bottom", fontsize=9)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(metric_labels, fontsize=11)
+    ax.set_ylabel("Score", fontsize=12)
+    ax.set_title("Method Comparison on Test Set", fontsize=14, fontweight="bold")
+    ax.set_ylim(0, 1.1)
+    ax.legend(fontsize=11)
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+
+
+def plot_per_category_heatmap(category_recall_map, out_path):
+    """category_recall_map: {category: {method: recall}}"""
+    categories = sorted(category_recall_map.keys())
+    methods = ["PMD", "SpotBugs", "Model"]
+
+    data = np.array([
+        [category_recall_map[c].get(m, 0.0) for m in methods]
+        for c in categories
+    ])
+
+    fig, ax = plt.subplots(figsize=(8, max(6, len(categories) * 0.5)))
+    sns.heatmap(
+        data, annot=True, fmt=".2f", cmap="RdYlGn", vmin=0, vmax=1,
+        xticklabels=methods, yticklabels=categories,
+        linewidths=0.5, linecolor="white", ax=ax,
+        cbar_kws={"label": "Recall"},
+    )
+    ax.set_title("Per-Category Recall\n(green = detected, red = missed)",
+                 fontsize=14, fontweight="bold")
+    ax.set_xlabel("Method", fontsize=12)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+
+
+def plot_roc_curves(roc_data, out_path):
+    """roc_data: {method: (y_true, y_prob)}"""
+    fig, ax = plt.subplots(figsize=(7, 7))
+    colors = {"PMD": COLOR_PMD, "SpotBugs": COLOR_SPOTBUGS, "Model": COLOR_MODEL}
+
+    for method, (y_true, y_prob) in roc_data.items():
+        if y_prob is None or len(set(y_true)) < 2:
+            continue
+        fpr, tpr, _ = roc_curve(y_true, y_prob)
+        auc = roc_auc_score(y_true, y_prob)
+        ax.plot(fpr, tpr, color=colors.get(method, "gray"), lw=2.5,
+                label=f"{method} (AUC = {auc:.3f})")
+
+    ax.plot([0, 1], [0, 1], color="gray", lw=1, linestyle="--", label="Random")
+    ax.set_xlim([0.0, 1.0])
+    ax.set_ylim([0.0, 1.05])
+    ax.set_xlabel("False Positive Rate", fontsize=12)
+    ax.set_ylabel("True Positive Rate", fontsize=12)
+    ax.set_title("ROC Curves", fontsize=14, fontweight="bold")
+    ax.legend(loc="lower right", fontsize=11)
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
 
 
 # ============================================================
 # MAIN
 # ============================================================
 
-def main() -> int:
+def main():
+    print("Loading data and model...\n")
     device = get_device()
-    print(f"Device: {device}\n")
 
-    # ---- Load data ----
-    print("Loading preprocessed data...")
-    records = load_preprocessed()
-    ast_vocab_size = load_ast_vocab_size()
+    with PREPROCESSED_PATH.open(encoding="utf-8") as f:
+        records = json.load(f)
 
-    # ---- Load static analysis ----
-    print("Loading static analysis results...")
-    static = load_static_analysis()
+    static = {}
+    with STATIC_ANALYSIS_PATH.open(encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            fn = (row.get("filename") or "").strip()
+            if fn:
+                static[fn] = row
 
-    # ---- Filter to test ----
     test_records = [r for r in records if r["split"] == "test"]
-    print(f"  Test records: {len(test_records)}\n")
 
-    if not test_records:
-        print("No test records found. Aborting.")
-        return 1
-
-    # ---- Load model ----
-    print("Loading model...")
-    model = DualStreamModel(ast_vocab_size=ast_vocab_size).to(device)
+    ast_vocab_size = len(json.loads((PROJECT_ROOT / "data" / "processed" / "ast_vocab.json").read_text()))
+    model = DualStreamModel(ast_vocab_size).to(device)
     checkpoint = torch.load(CHECKPOINT_PATH, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
-    print(f"  Loaded checkpoint from epoch {checkpoint.get('epoch', '?')}\n")
 
-    # ---- Load held-out categories ----
-    HOLDOUT_CATEGORIES = checkpoint.get(
-        "holdout_categories",
-        [
-            "swallows_declared_exception",
-            "corrupted_state_on_exception",
-            "inconsistent_with_precheck",
-            "empty_catch",
-        ],
-    )
-    print(f"Held-out categories: {HOLDOUT_CATEGORIES}\n")
+    print(f"Model loaded from {CHECKPOINT_PATH.name}")
+    print(f"Test records: {len(test_records)}\n")
 
-    # ---- Predict on test ----
-    print("Running predictions on test set...")
-    test_loader = DataLoader(
-        ExceptionDataset(test_records),
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        collate_fn=collate_fn,
-    )
-    model_preds = predict(model, test_loader, device)
+    # Predict with model
+    loader = DataLoader(ExceptionDataset(test_records), batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
+    model_preds = predict_proba(model, loader, device)
 
-    # ---- Attach predictions and static results to each record ----
+    # Enrich with static tool predictions
     enriched = []
     for i, r in enumerate(test_records):
         fn = r["id"] + ".java"
-        sa_row = static.get(fn, {})
-        sa_match = (sa_row.get("candidate_category_match", "") or "").strip().upper()
-        sa_tool = sa_row.get("candidate_matching_tools", "") or ""
+        row = static.get(fn, {})
+        sa_match = (row.get("candidate_category_match") or "").strip().upper()
+        tools = (row.get("candidate_matching_tools") or "").strip()
 
         enriched.append({
-            "record": r,
-            "model_pred": model_preds.get(i, 0),
-            "pmd_pred": 1 if sa_match == "YES" and "PMD" in sa_tool else 0,
-            "spotbugs_pred": 1 if sa_match == "YES" and "SpotBugs" in sa_tool else 0,
-            "any_sa_pred": 1 if sa_match == "YES" else 0,
+            "label": int(r["label"]),
+            "category": r["defect_category"] or "clean",
+            "model_pred": model_preds[i]["pred"],
+            "model_prob": model_preds[i]["prob_defective"],
+            "pmd_pred": 1 if (sa_match == "YES" and "PMD" in tools) else 0,
+            "spotbugs_pred": 1 if (sa_match == "YES" and "SpotBugs" in tools) else 0,
         })
 
-    # ---- Compute metrics ----
-    print("\n" + "=" * 60)
-    print("Test set evaluation")
-    print("=" * 60 + "\n")
+    # Metrics per method
+    y_true = [e["label"] for e in enriched]
+    all_metrics = {}
 
-    # In-distribution: seen categories
-    id_records = [e for e in enriched if e["record"]["defect_category"] not in HOLDOUT_CATEGORIES]
-    ood_records = [e for e in enriched if e["record"]["defect_category"] in HOLDOUT_CATEGORIES]
+    for method, key in [("PMD", "pmd_pred"), ("SpotBugs", "spotbugs_pred"), ("Model", "model_pred")]:
+        y_pred = [e[key] for e in enriched]
+        y_prob = [e["model_prob"] for e in enriched] if method == "Model" else None
+        all_metrics[method] = compute_full_metrics(y_true, y_pred, y_prob)
 
-    print(f"Test split by category visibility:")
-    print(f"  In-distribution (seen categories):  {len(id_records)}")
-    print(f"  Out-of-distribution (held-out):     {len(ood_records)}")
-    print()
-
-    methods = [
-        ("PMD", "pmd_pred"),
-        ("SpotBugs", "spotbugs_pred"),
-        ("Any static tool", "any_sa_pred"),
-        ("Model (ID)", "model_pred"),
-        ("Model (OOD)", "model_pred"),
-    ]
-
-    results = {}
-
-    for method_name, pred_key in methods:
-        if method_name == "Model (ID)":
-            subset = id_records
-        elif method_name == "Model (OOD)":
-            subset = ood_records
-        else:
-            subset = enriched  # static tools evaluated on the full test set
-
-        y_true = [e["record"]["label"] for e in subset]
-        y_pred = [e[pred_key] for e in subset]
-
-        m = compute_metrics(y_true, y_pred)
-        results[method_name] = m
-
-    # Print table
-    print(f"{'Method':<20} {'Prec':>7} {'Rec':>7} {'F1':>7} {'MCC':>7} {'N':>5}")
-    print("-" * 60)
-    for method_name, _ in methods:
-        m = results[method_name]
-        print(f"{method_name:<20} {m['precision']:>7.4f} {m['recall']:>7.4f} "
-              f"{m['f1']:>7.4f} {m['mcc']:>7.4f} {m['n']:>5}")
-
-    # ---- McNemar's test ----
-    print("\n" + "=" * 60)
-    print("McNemar's test (Model ID vs static tools)")
-    print("=" * 60 + "\n")
-
-    id_only = id_records
-    y_true = [e["record"]["label"] for e in id_only]
-    model_preds_list = [e["model_pred"] for e in id_only]
-    pmd_preds_list = [e["pmd_pred"] for e in id_only]
-    sa_preds_list = [e["any_sa_pred"] for e in id_only]
-
-    mc = mcnemar_test(y_true, model_preds_list, pmd_preds_list)
-    print(f"Model (ID) vs PMD:")
-    print(f"  n01 (only model correct):    {mc['n01']}")
-    print(f"  n10 (only PMD correct):      {mc['n10']}")
-    print(f"  statistic:                   {mc['statistic']:.4f}")
-    print(f"  p-value:                     {mc['p_value']:.4f}")
-    print(f"  significant at α=0.05:       {'YES' if mc['p_value'] < 0.05 else 'NO'}")
-    print()
-
-    mc_sa = mcnemar_test(y_true, model_preds_list, sa_preds_list)
-    print(f"Model (ID) vs any static tool:")
-    print(f"  n01 (only model correct):    {mc_sa['n01']}")
-    print(f"  n10 (only static correct):   {mc_sa['n10']}")
-    print(f"  statistic:                   {mc_sa['statistic']:.4f}")
-    print(f"  p-value:                     {mc_sa['p_value']:.4f}")
-    print(f"  significant at α=0.05:       {'YES' if mc_sa['p_value'] < 0.05 else 'NO'}")
-    print()
-
-    # ---- Per-category breakdown ----
-    print("=" * 60)
-    print("Per-category breakdown (all test records, by defect_category)")
-    print("=" * 60 + "\n")
-
-    by_cat = defaultdict(list)
+    # Per-category recall
+    per_cat = defaultdict(lambda: defaultdict(list))
     for e in enriched:
-        cat = e["record"]["defect_category"] or "clean"
-        by_cat[cat].append(e)
+        per_cat[e["category"]]["PMD"].append((e["label"], e["pmd_pred"]))
+        per_cat[e["category"]]["SpotBugs"].append((e["label"], e["spotbugs_pred"]))
+        per_cat[e["category"]]["Model"].append((e["label"], e["model_pred"]))
 
-    print(f"{'Category':<35} {'N':>4} {'Model F1':>10} {'PMD F1':>10}")
-    print("-" * 60)
-    for cat in sorted(by_cat.keys()):
-        entries = by_cat[cat]
-        y_true = [e["record"]["label"] for e in entries]
-        y_m = [e["model_pred"] for e in entries]
-        y_p = [e["pmd_pred"] for e in entries]
-        f1_m = f1_score(y_true, y_m, zero_division=0)
-        f1_p = f1_score(y_true, y_p, zero_division=0)
-        print(f"{cat:<35} {len(entries):>4} {f1_m:>10.4f} {f1_p:>10.4f}")
+    category_recall_map = {}
+    for cat, methods in per_cat.items():
+        category_recall_map[cat] = {}
+        for method, pairs in methods.items():
+            yt = [p[0] for p in pairs]
+            yp = [p[1] for p in pairs]
+            if sum(yt) > 0:
+                category_recall_map[cat][method] = recall_score(yt, yp, zero_division=0)
 
-    # ---- Write results ----
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with OUTPUT_PATH.open("w", newline="", encoding="utf-8") as f:
+    # ROC data
+    roc_data = {
+        "PMD": (y_true, [e["pmd_pred"] for e in enriched]),
+        "SpotBugs": (y_true, [e["spotbugs_pred"] for e in enriched]),
+        "Model": (y_true, [e["model_prob"] for e in enriched]),
+    }
+
+    # ---- Generate plots ----
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    for method, key, cmap in [
+        ("PMD", "pmd_pred", "Oranges"),
+        ("SpotBugs", "spotbugs_pred", "Reds"),
+        ("Model", "model_pred", "Blues"),
+    ]:
+        y_pred = [e[key] for e in enriched]
+        plot_confusion(y_true, y_pred, method, cmap, FIGURES_DIR / f"confusion_{method}.png")
+
+    plot_comparison_bar(all_metrics, FIGURES_DIR / "comparison_bar.png")
+    plot_per_category_heatmap(category_recall_map, FIGURES_DIR / "per_category_heatmap.png")
+    plot_roc_curves(roc_data, FIGURES_DIR / "roc_curves.png")
+
+    # ---- Save summary CSV ----
+    with SUMMARY_CSV.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["method", "precision", "recall", "f1", "mcc", "n"])
-        for method_name, _ in methods:
-            m = results[method_name]
-            writer.writerow([method_name, m["precision"], m["recall"], m["f1"], m["mcc"], m["n"]])
-        writer.writerow([])
-        writer.writerow(["mcnemar_against", "n01", "n10", "statistic", "p_value"])
-        writer.writerow(["PMD", mc["n01"], mc["n10"], mc["statistic"], mc["p_value"]])
-        writer.writerow(["Any static tool", mc_sa["n01"], mc_sa["n10"], mc_sa["statistic"], mc_sa["p_value"]])
+        writer.writerow(["method", "accuracy", "precision", "recall", "f1", "mcc", "roc_auc"])
+        for method, m in all_metrics.items():
+            writer.writerow([
+                method,
+                f"{m['accuracy']:.4f}",
+                f"{m['precision']:.4f}",
+                f"{m['recall']:.4f}",
+                f"{m['f1']:.4f}",
+                f"{m['mcc']:.4f}",
+                f"{m['roc_auc']:.4f}",
+            ])
 
-    print(f"\nWrote results to {OUTPUT_PATH.relative_to(PROJECT_ROOT)}")
+    # ---- Console summary ----
+    print("=" * 70)
+    print("SUMMARY — Full test set (150 records)")
+    print("=" * 70)
+    print(f"{'Method':<12} {'Accuracy':>10} {'Precision':>10} {'Recall':>10} {'F1':>10} {'MCC':>10} {'ROC-AUC':>10}")
+    print("-" * 70)
+    for method, m in all_metrics.items():
+        print(f"{method:<12} {m['accuracy']:>10.4f} {m['precision']:>10.4f} {m['recall']:>10.4f} "
+              f"{m['f1']:>10.4f} {m['mcc']:>10.4f} {m['roc_auc']:>10.4f}")
+
+    print(f"\nFigures saved to {FIGURES_DIR}")
+    print(f"Summary metrics saved to {SUMMARY_CSV}")
 
     return 0
 
-
-# ============================================================
-# ENTRY
-# ============================================================
 
 if __name__ == "__main__":
     sys.exit(main())
