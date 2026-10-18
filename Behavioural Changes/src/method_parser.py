@@ -69,9 +69,10 @@ class MethodParser:
         try:
             import javalang
             wrapped = f"public class WrapperClass {{\n{cleaned_code}\n}}"
-            tree = javalang.parse.parse(wrapped)
-            if tree.types and tree.types[0].methods:
-                ast_method = tree.types[0].methods[0]
+            tree: Any = javalang.parse.parse(wrapped)
+            types = getattr(tree, "types", None)
+            if types and getattr(types[0], "methods", None):
+                ast_method = types[0].methods[0]
                 parameters = [
                     MethodParameter(
                         type=self._format_ast_type(param.type),
