@@ -85,7 +85,7 @@ public class MaintainabilityPriorityRanker {
                     + factors.distinctConcerns()
                     + ", affected source files="
                     + factors.affectedFiles()
-                    + ", findings with usable metric evidence="
+                    + ", findings with supported numeric or structural evidence="
                     + factors.supportedFindings()
                     + ". These factors are not calibrated "
                     + "against maintenance effort.";
@@ -110,15 +110,19 @@ public class MaintainabilityPriorityRanker {
         int supported = 0;
 
         for (MaintainabilityFinding finding : group.findings()) {
-            Double value = evidenceExceedance(finding);
 
-            if (value != null) {
+                Double exceedance = evidenceExceedance(finding);
+
+                if (exceedance != null) {
                 highestExceedance = Math.max(
                         highestExceedance,
-                        value
+                        exceedance
                 );
+
                 supported++;
-            }
+                } else if (hasSupportedStructuralEvidence(finding)) {
+                supported++;
+                }
         }
 
         int concerns = (int) group.findings()
@@ -143,6 +147,62 @@ public class MaintainabilityPriorityRanker {
                 supported
         );
     }
+
+
+    /**
+         * Recognizes specific preliminary structural evidence
+         * without inventing numerical metric exceedance.
+         *
+         * Currently supports normalized method-body duplication.
+         * Other structural concerns require separately validated
+         * evidence contracts before being counted here.
+   */
+    private boolean hasSupportedStructuralEvidence(
+                MaintainabilityFinding finding) {
+
+        Map<String, String> evidence = finding.evidence();
+
+        if (finding.concern()
+                != MaintainabilityConcern.DUPLICATED_LOGIC) {
+                return false;
+        }
+
+        if (!"exact_normalized_method_body".equals(
+                evidence.get("measurement"))) {
+                return false;
+        }
+
+        String fingerprint = evidence.get("fingerprint");
+
+        if (fingerprint == null || fingerprint.isBlank()) {
+                return false;
+        }
+
+        Double tokenCount =
+                number(evidence, "normalizedTokenCount");
+
+        Double occurrences =
+                number(evidence, "occurrenceCount");
+
+        Double affectedFiles =
+                number(evidence, "affectedFileCount");
+
+        return tokenCount != null
+                && tokenCount >= 10
+                && occurrences != null
+                && occurrences >= 2
+                && affectedFiles != null
+                && affectedFiles >= 1
+                && isWholeNumber(tokenCount)
+                && isWholeNumber(occurrences)
+                && isWholeNumber(affectedFiles);
+    }
+
+    private boolean isWholeNumber(double value) {
+        return value == Math.floor(value);
+    }
+
+
 
     /**
      * Returns null if no supported numeric metric/boundary

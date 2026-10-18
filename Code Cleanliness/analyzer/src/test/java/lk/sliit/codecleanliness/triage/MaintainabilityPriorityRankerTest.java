@@ -267,4 +267,63 @@ class MaintainabilityPriorityRankerTest {
                 () -> ranker.rank(List.of(first, second))
         );
     }
+
+
+    
+    @Test
+    void recognizesCrossFileDuplicationAsStructuralEvidence() {
+
+        IssueGroup crossFileDuplicate = group(
+                "G-DUPLICATE",
+                finding(
+                        "D1",
+                        MaintainabilityConcern.DUPLICATED_LOGIC,
+                        "src/First.java",
+                        Map.of(
+                                "fingerprint", "abc123",
+                                "measurement",
+                                "exact_normalized_method_body",
+                                "normalizedTokenCount", "50",
+                                "occurrenceCount", "2",
+                                "affectedFileCount", "2"
+                        )
+                ),
+                finding(
+                        "D2",
+                        MaintainabilityConcern.DUPLICATED_LOGIC,
+                        "src/Second.java",
+                        Map.of(
+                                "fingerprint", "abc123",
+                                "measurement",
+                                "exact_normalized_method_body",
+                                "normalizedTokenCount", "50",
+                                "occurrenceCount", "2",
+                                "affectedFileCount", "2"
+                        )
+                )
+        );
+
+        RankedIssueGroup result =
+                ranker.rank(List.of(crossFileDuplicate))
+                        .get(0);
+
+        assertEquals(2, result.affectedFileCount());
+
+        assertEquals(
+                2,
+                result.supportedFindingCount(),
+                "Both duplicated logic findings have "
+                        + "supported structural evidence"
+        );
+
+        assertEquals(
+                0.0,
+                result.exceedanceScore(),
+                0.000001,
+                "Structural duplication evidence must not "
+                        + "be converted into a fabricated "
+                        + "threshold exceedance"
+        );
+    }
+
 }
