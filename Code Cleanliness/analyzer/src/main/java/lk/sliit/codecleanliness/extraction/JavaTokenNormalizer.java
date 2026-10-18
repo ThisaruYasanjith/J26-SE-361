@@ -1,18 +1,59 @@
 
 package lk.sliit.codecleanliness.extraction;
 
+import com.github.javaparser.JavaParser;
 import com.github.javaparser.JavaToken;
-import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ParseResult;
+import com.github.javaparser.ParseStart;
+import com.github.javaparser.ParserConfiguration;
+import com.github.javaparser.Providers;
 import com.github.javaparser.ast.stmt.BlockStmt;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 public class JavaTokenNormalizer {
 
+    private final JavaParser parser;
+
+    public JavaTokenNormalizer() {
+        this(new ParserConfiguration()
+                .setLanguageLevel(
+                        ParserConfiguration.LanguageLevel.JAVA_17
+                ));
+    }
+
+    public JavaTokenNormalizer(ParserConfiguration configuration) {
+        this.parser = new JavaParser(
+                Objects.requireNonNull(
+                        configuration,
+                        "Parser configuration is required"
+                )
+        );
+    }
+
     public List<String> normalizeMethodBody(String methodBody) {
 
-        BlockStmt body = StaticJavaParser.parseBlock(methodBody);
+        if (methodBody == null || methodBody.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Method body cannot be null or blank"
+            );
+        }
+
+        ParseResult<BlockStmt> result = parser.parse(
+                ParseStart.BLOCK,
+                Providers.provider(methodBody)
+        );
+
+        if (!result.isSuccessful() || result.getResult().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Failed to parse Java method body: "
+                            + result.getProblems()
+            );
+        }
+
+        BlockStmt body = result.getResult().orElseThrow();
 
         List<String> normalized = new ArrayList<>();
 

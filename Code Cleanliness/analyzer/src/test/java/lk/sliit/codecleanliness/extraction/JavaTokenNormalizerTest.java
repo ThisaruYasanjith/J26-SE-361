@@ -89,4 +89,5 @@ class JavaTokenNormalizerTest {
 
         assertEquals(first, second);
     }
+    
 }
