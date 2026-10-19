@@ -645,6 +645,34 @@ export class BehaviouralPanel {
             </div>
           </div>
 
+          <!-- Stage 6: Developer Guidance & Regression Test Generation -->
+          <div class="section-title">
+            <i class="codicon codicon-beaker"></i>
+            6. Developer Guidance & Regression Test Generation
+          </div>
+
+          <div class="issue-card" style="margin-bottom: 12px; background: rgba(56, 189, 248, 0.08); border-color: #0284c7;">
+            <p style="margin: 0; font-size: 12px;"><strong>Overview:</strong> <span id="guidanceOverviewText">None</span></p>
+          </div>
+
+          <div class="issue-card" style="margin-bottom: 12px;">
+            <div style="font-weight: 600; font-size: 12px; margin-bottom: 4px;">🔬 Technical Breakdown</div>
+            <p id="techBreakdownText" style="font-size: 12px; margin: 0 0 10px 0; color: var(--vscode-foreground); white-space: pre-line;"></p>
+
+            <div id="failureScenariosSec" style="display: none; margin-bottom: 10px;">
+              <div style="font-weight: 600; font-size: 12px; margin-bottom: 4px; color: #f87171;">⚡ Divergent Runtime Scenarios (Failure Modes):</div>
+              <div id="failureScenariosList" style="font-size: 12px; margin-left: 6px;"></div>
+            </div>
+
+            <div id="junitTestsSec" style="display: none; margin-bottom: 10px;">
+              <div style="font-weight: 600; font-size: 12px; margin-bottom: 4px; color: #38bdf8;">🧪 Suggested JUnit Tests to Guard Against Drift:</div>
+              <div id="junitTestsList"></div>
+            </div>
+
+            <div style="font-weight: 600; font-size: 12px; margin-bottom: 4px; color: #fbbf24;">💡 Developer Guidance:</div>
+            <p id="devGuidanceText" style="font-size: 12px; margin: 0; color: var(--vscode-foreground); white-space: pre-line;"></p>
+          </div>
+
           <div class="section-title">
             <i class="codicon codicon-warning"></i>
             Detected Governance Alerts
@@ -733,6 +761,18 @@ export class BehaviouralPanel {
             const btn = document.getElementById('runBtn');
             btn.disabled = false;
             btn.innerHTML = '<i class="codicon codicon-play"></i> <span>Analyze with Fine-Tuned CodeT5</span>';
+          }
+
+          function copyCode(btn) {
+            const pre = btn.parentElement.nextElementSibling;
+            if (pre) {
+              const text = pre.innerText;
+              navigator.clipboard.writeText(text).then(() => {
+                const orig = btn.innerText;
+                btn.innerText = '✅ Copied!';
+                setTimeout(() => { btn.innerText = orig; }, 2000);
+              });
+            }
           }
 
           function renderChips(containerId, list, extraClass) {
@@ -947,6 +987,45 @@ export class BehaviouralPanel {
                   } else {
                     mitSec.style.display = 'none';
                   }
+                }
+
+                // Render Stage 6: Developer Guidance & JUnit Test Generation
+                const s6 = data.stage6_guidance;
+                if (s6) {
+                  document.getElementById('guidanceOverviewText').innerText = s6.overview || 'Analysis complete.';
+                  document.getElementById('techBreakdownText').innerText = s6.detailed_drift_breakdown || 'No technical divergence breakdown available.';
+
+                  const failSec = document.getElementById('failureScenariosSec');
+                  const failList = document.getElementById('failureScenariosList');
+                  if (s6.failure_scenarios && s6.failure_scenarios.length > 0) {
+                    failSec.style.display = 'block';
+                    failList.innerHTML = s6.failure_scenarios.map(s => \`<div style="margin-bottom: 3px;">• \${s}</div>\`).join('');
+                  } else {
+                    failSec.style.display = 'none';
+                  }
+
+                  const junitSec = document.getElementById('junitTestsSec');
+                  const junitList = document.getElementById('junitTestsList');
+                  if (s6.recommended_unit_tests && s6.recommended_unit_tests.length > 0) {
+                    junitSec.style.display = 'block';
+                    junitList.innerHTML = '';
+                    s6.recommended_unit_tests.forEach((t, idx) => {
+                      const escaped = t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                      junitList.innerHTML += \`
+                        <div style="margin-bottom: 8px;">
+                          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                            <span style="font-size: 11px; opacity: 0.8; font-family: monospace;">Test #\${idx + 1} (JUnit 5):</span>
+                            <button class="secondary-btn" style="padding: 2px 8px; font-size: 10px;" onclick="copyCode(this)">📋 Copy Test</button>
+                          </div>
+                          <div class="code-box" style="white-space: pre; font-size: 11px; max-height: 250px;">\${escaped}</div>
+                        </div>
+                      \`;
+                    });
+                  } else {
+                    junitSec.style.display = 'none';
+                  }
+
+                  document.getElementById('devGuidanceText').innerText = s6.developer_guidance || 'No specific developer guidance.';
                 }
 
                 // Render dynamic alerts
