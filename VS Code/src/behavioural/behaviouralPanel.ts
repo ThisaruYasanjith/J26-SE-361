@@ -469,7 +469,6 @@ export class BehaviouralPanel {
               </button>
             </div>
             <textarea id="oldMethodInput" rows="8" placeholder="Select a method in editor and click 'Capture Selection' or paste baseline code here..."></textarea>
-            <div id="v1Meta" style="display: none; font-size: 11px; color: var(--vscode-editorInfo-foreground); margin-top: 4px;"></div>
           </div>
           <div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
@@ -479,7 +478,6 @@ export class BehaviouralPanel {
               </button>
             </div>
             <textarea id="newMethodInput" rows="8" placeholder="Edit and save in editor to auto-capture or paste modified code here..."></textarea>
-            <div id="v2Meta" style="display: none; font-size: 11px; color: var(--vscode-editorInfo-foreground); margin-top: 4px;"></div>
           </div>
         </div>
 
@@ -776,23 +774,14 @@ export class BehaviouralPanel {
               }
               case 'updateBaselineMethod': {
                 document.getElementById('oldMethodInput').value = msg.methodCode || '';
-                const meta = document.getElementById('v1Meta');
-                meta.style.display = 'block';
-                meta.innerText = '📍 Captured from ' + (msg.fileName || 'editor') + ': ' + (msg.signature || msg.methodName);
                 break;
               }
               case 'updateModifiedMethod': {
                 document.getElementById('newMethodInput').value = msg.methodCode || '';
-                const meta = document.getElementById('v2Meta');
-                meta.style.display = 'block';
-                meta.innerText = '📍 Captured from ' + (msg.fileName || 'editor') + ': ' + (msg.signature || msg.methodName);
                 break;
               }
               case 'autoCapturedRefactoredMethod': {
                 document.getElementById('newMethodInput').value = msg.methodCode || '';
-                const meta = document.getElementById('v2Meta');
-                meta.style.display = 'block';
-                meta.innerText = '📍 Auto-Captured on Save: ' + (msg.signature || msg.methodName);
                 const banner = document.getElementById('autoCaptureBanner');
                 const bannerText = document.getElementById('autoCaptureText');
                 banner.style.display = 'block';
