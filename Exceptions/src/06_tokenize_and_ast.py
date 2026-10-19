@@ -5,9 +5,12 @@ and serialize its AST with tree-sitter-java for the structural stream.
 Input:  data/processed/dataset.json  (built by 04_build_dataset.py)
 Output: data/processed/preprocessed.json
         + data/processed/ast_vocab.json  (AST node type -> integer ID)
+        + data/processed/category_map.json  (defect category -> integer ID)
 
 Both streams (semantic + structural) are computed from the same `code`
 field and saved side by side. The model will consume them in parallel.
+
+Each record also carries a `category_id` (0-14) for multi-class training.
 
 Run from project root:
     python src/06_tokenize_and_ast.py
@@ -34,11 +37,35 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATASET_PATH = PROJECT_ROOT / "data" / "processed" / "dataset.json"
 OUTPUT_PATH = PROJECT_ROOT / "data" / "processed" / "preprocessed.json"
 AST_VOCAB_PATH = PROJECT_ROOT / "data" / "processed" / "ast_vocab.json"
+CATEGORY_MAP_PATH = PROJECT_ROOT / "data" / "processed" / "category_map.json"
 
 GCBERT_MODEL_NAME = "microsoft/graphcodebert-base"
 
 MAX_TOKEN_LEN = 512       # GraphCodeBERT input limit
 MAX_AST_LEN = 256         # Cap for structural stream
+
+# ------------------------------------------------------------
+# Category mapping: 14 defect categories + "clean" = 15 classes
+# Used for multi-class training (the model predicts one of these).
+# ------------------------------------------------------------
+CATEGORY_TO_ID = {
+    "clean": 0,
+    "empty_catch": 1,
+    "overly_broad_catch": 2,
+    "print_stacktrace": 3,
+    "wrong_propagation": 4,
+    "exception_swallowing": 5,
+    "inappropriate_handling": 6,
+    "swallows_declared_exception": 7,
+    "ambiguous_error_return": 8,
+    "inconsistent_with_precheck": 9,
+    "corrupted_state_on_exception": 10,
+    "missing_retry": 11,
+    "lost_exception_cause": 12,
+    "wrong_exception_type": 13,
+    "empty_catch_with_context": 14,
+}
+NUM_CATEGORIES = len(CATEGORY_TO_ID)
 
 
 # ============================================================
@@ -61,6 +88,13 @@ def main() -> int:
     print(f"Loading tokenizer {GCBERT_MODEL_NAME}...")
     tokenizer = AutoTokenizer.from_pretrained(GCBERT_MODEL_NAME)
     print("  Done.\n")
+
+    # ---------------------------------------------------------
+    # Save category map (for later use in training/evaluation)
+    # ---------------------------------------------------------
+    _save_json(CATEGORY_TO_ID, CATEGORY_MAP_PATH)
+    print(f"  Category map saved: {CATEGORY_MAP_PATH.relative_to(PROJECT_ROOT)}")
+    print(f"  ({NUM_CATEGORIES} classes)\n")
 
     # ---------------------------------------------------------
     # Step 1: sanity check token lengths
@@ -86,6 +120,7 @@ def main() -> int:
     print("Preprocessing records...")
     preprocessed: list[dict[str, Any]] = []
     skipped = 0
+    unknown_category = 0
 
     for i, record in enumerate(records, 1):
         code = record["code"]
@@ -108,9 +143,19 @@ def main() -> int:
             skipped += 1
             continue
 
+        # --- Category ID (for multi-class training) ---
+        category_name = record["defect_category"] or "clean"
+        category_id = CATEGORY_TO_ID.get(category_name)
+        if category_id is None:
+            unknown_category += 1
+            category_id = 0          # fallback to "clean"
+            category_name = "clean"
+
         preprocessed.append({
             "id": record["id"],
             "label": record["label"],
+            "category_id": category_id,           # ← NEW: 0-14
+            "category_name": category_name,       # ← NEW
             "split": record["split"],
             "defect_category": record["defect_category"],
             "operation": record["operation"],
@@ -126,7 +171,8 @@ def main() -> int:
         if i % 250 == 0:
             print(f"    Processed {i} / {len(records)}")
 
-    print(f"\n  Preprocessed {len(preprocessed)} records ({skipped} skipped).\n")
+    print(f"\n  Preprocessed {len(preprocessed)} records ({skipped} skipped, "
+          f"{unknown_category} unknown category).\n")
 
     # ---------------------------------------------------------
     # Step 4: write output
@@ -264,15 +310,21 @@ def _save_json(obj: Any, path: Path) -> None:
 def _print_summary(records: list[dict]) -> None:
     labels = Counter(r["label"] for r in records)
     splits = Counter(r["split"] for r in records)
+    categories = Counter(r["category_name"] for r in records)
 
     print("Summary:")
     print(f"  Total records:      {len(records)}")
     print(f"  Clean (label=0):    {labels[0]}")
     print(f"  Defective (label=1):{labels[1]}")
+    print(f"  Categories:         {len(categories)}")
     print()
     print("Split distribution:")
     for split, count in splits.most_common():
         print(f"  {split:8s} {count}")
+    print()
+    print("Category distribution:")
+    for cat, count in categories.most_common():
+        print(f"  {cat:32s} {count}")
     print()
 
     # Show a sample record (first one)
@@ -280,6 +332,7 @@ def _print_summary(records: list[dict]) -> None:
     print("Sample record:")
     print(f"  id:               {sample['id']}")
     print(f"  label:            {sample['label']}")
+    print(f"  category_id:      {sample['category_id']} ({sample['category_name']})")
     print(f"  input_ids length: {len(sample['input_ids'])}")
     print(f"  ast_ids length:   {len(sample['ast_ids'])}")
     print(f"  first 10 input_ids: {sample['input_ids'][:10]}")
