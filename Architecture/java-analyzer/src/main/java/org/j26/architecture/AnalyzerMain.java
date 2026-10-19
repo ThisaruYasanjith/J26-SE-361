@@ -67,6 +67,15 @@ public final class AnalyzerMain {
                 output.println(source + " " + relationship.relationship() + " " + target);
             }
 
+            try {
+                Path contextFile = new ProjectContextWriter().write(projectRoot, result.components(), result.relationships());
+                output.println("Project context written to:");
+                output.println(projectRoot.relativize(contextFile).toString().replace('\\', '/'));
+            } catch (IOException | SecurityException exception) {
+                errors.println("Error: unable to write project context: " + exception.getMessage());
+                return 1;
+            }
+
             // A partial scan still prints its summary, but scripts can detect the failures.
             return result.parseFailures().isEmpty() ? 0 : 1;
         } catch (InvalidPathException exception) {

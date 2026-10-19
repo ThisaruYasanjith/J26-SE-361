@@ -13,7 +13,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0.0",
+      "const": "1.0",
       "description": "Version of this project-context contract."
     },
     "project_name": {
@@ -23,7 +23,7 @@
     "project_root": {
       "type": "string",
       "minLength": 1,
-      "description": "Absolute path to the Spring Boot project being analyzed."
+      "description": "Portable path to the analyzed project root. Use \".\" instead of a machine-specific absolute path."
     },
     "components": {
       "type": "array",

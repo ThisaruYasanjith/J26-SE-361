@@ -23,7 +23,7 @@
             <artifactId>javaparser-core</artifactId>
             <version>${javaparser.version}</version>
         </dependency>
-        <!-- JSON output will be added later; this commit only scans and parses. -->
+        <!-- Jackson handles the shared context model and its JSON output. -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
