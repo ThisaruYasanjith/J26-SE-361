@@ -896,35 +896,62 @@ export class BehaviouralPanel {
                 renderChips('retainedChips', retainedCats, 'cat-retained');
 
                 // Render Stage 4: Behavioral Drift Metrics
-                const s4 = data.stage4_drift;
-                if (s4) {
-                  document.getElementById('driftScoreVal').innerText = s4.drift_score_pct !== undefined ? (s4.drift_score_pct + '%') : ((s4.drift_score * 100).toFixed(1) + '%');
-                  const sev = (s4.severity || 'NONE').toUpperCase();
-                  const sevBadge = document.getElementById('driftSeverityBadge');
-                  sevBadge.innerText = sev;
-                  sevBadge.className = sev === 'CRITICAL' ? 'badge-critical' :
-                                       sev === 'HIGH' ? 'badge-high' :
-                                       sev === 'MEDIUM' ? 'badge-medium' :
-                                       sev === 'LOW' ? 'badge-low' : 'badge-none';
+                let s4 = data.stage4_drift;
+                if (!s4) {
+                  // Resilient fallback if backend returned partial pipeline
+                  const driftDetected = (addedCats.length > 0 || removedCats.length > 0);
+                  const totalCats = addedCats.length + removedCats.length + retainedCats.length;
+                  const score = totalCats > 0 ? (addedCats.length + removedCats.length) / totalCats : 0.0;
+                  s4 = {
+                    drift_detected: driftDetected,
+                    drift_score: score,
+                    drift_score_pct: Math.round(score * 1000) / 10,
+                    severity: score > 0.6 ? 'HIGH' : score > 0.3 ? 'MEDIUM' : score > 0 ? 'LOW' : 'NONE',
+                    summary: driftDetected ? ('Behavioral drift detected across ' + (addedCats.length + removedCats.length) + ' category changes.') : 'No behavioral drift detected.',
+                    flagged_drift_areas: [...addedCats, ...removedCats],
+                    dimension_deltas: []
+                  };
+                }
 
-                  const detectedVal = document.getElementById('driftDetectedVal');
-                  detectedVal.innerText = s4.drift_detected ? 'YES' : 'NO';
-                  detectedVal.style.color = s4.drift_detected ? '#f87171' : '#4ade80';
+                const driftPct = s4.drift_score_pct != null
+                  ? s4.drift_score_pct
+                  : (s4.drift_score != null ? (s4.drift_score * 100).toFixed(1) : '0.0');
+                document.getElementById('driftScoreVal').innerText = driftPct + '%';
 
-                  document.getElementById('driftSummaryText').innerText = s4.summary || 'No behavioral drift detected.';
+                const rawSev = (s4.severity || 'NONE').toUpperCase();
+                const sev = rawSev === 'CRITICAL' ? 'CRITICAL' :
+                            rawSev === 'HIGH' ? 'HIGH' :
+                            rawSev === 'MEDIUM' ? 'MEDIUM' :
+                            rawSev === 'LOW' ? 'LOW' : 'NONE';
+                const sevBadge = document.getElementById('driftSeverityBadge');
+                sevBadge.innerText = sev;
+                sevBadge.className = sev === 'CRITICAL' ? 'badge-critical' :
+                                     sev === 'HIGH' ? 'badge-high' :
+                                     sev === 'MEDIUM' ? 'badge-medium' :
+                                     sev === 'LOW' ? 'badge-low' : 'badge-none';
 
-                  const affRow = document.getElementById('affectedDimensionsRow');
-                  const affText = document.getElementById('affectedDimensionsText');
-                  if (s4.flagged_drift_areas && s4.flagged_drift_areas.length > 0) {
-                    affRow.style.display = 'block';
-                    affText.innerText = s4.flagged_drift_areas.join(', ');
-                  } else {
-                    affRow.style.display = 'none';
-                  }
+                const detectedVal = document.getElementById('driftDetectedVal');
+                const isDrift = Boolean(s4.drift_detected);
+                detectedVal.innerText = isDrift ? 'YES' : 'NO';
+                detectedVal.style.color = isDrift ? '#f87171' : '#4ade80';
 
-                  const deltasList = document.getElementById('dimensionDeltasList');
-                  deltasList.innerHTML = '';
-                  (s4.dimension_deltas || []).forEach(d => {
+                document.getElementById('driftSummaryText').innerText = s4.summary || 'No behavioral drift detected.';
+
+                const affRow = document.getElementById('affectedDimensionsRow');
+                const affText = document.getElementById('affectedDimensionsText');
+                if (s4.flagged_drift_areas && s4.flagged_drift_areas.length > 0) {
+                  affRow.style.display = 'block';
+                  affText.innerText = s4.flagged_drift_areas.join(', ');
+                } else {
+                  affRow.style.display = 'none';
+                }
+
+                const deltasList = document.getElementById('dimensionDeltasList');
+                deltasList.innerHTML = '';
+                if (!s4.dimension_deltas || s4.dimension_deltas.length === 0) {
+                  deltasList.innerHTML = '<div style="font-size: 11px; opacity: 0.7; font-style: italic;">No dimension deltas to display.</div>';
+                } else {
+                  s4.dimension_deltas.forEach(d => {
                     const icon = d.has_drift ? '⚠️' : '✔️';
                     let detailHtml = '';
                     if (d.has_drift) {
@@ -937,7 +964,7 @@ export class BehaviouralPanel {
                     } else {
                       detailHtml = '<div style="margin-left: 14px; font-size: 11px; opacity: 0.7;">No divergence detected in this dimension.</div>';
                     }
-                    deltasList.innerHTML += \`<div style="margin-bottom: 6px;">
+                    deltasList.innerHTML += \`<div style="margin-bottom: 6px; padding: 4px 6px; background: rgba(0,0,0,0.15); border-radius: 3px;">
                       <div style="font-size: 12px; font-weight: 600;">\${icon} \${(d.dimension || '').toUpperCase()} <span style="font-size: 11px; font-weight: normal; opacity: 0.7;">(weight: \${Number(d.weight || 0).toFixed(2)})</span></div>
                       \${detailHtml}
                     </div>\`;
