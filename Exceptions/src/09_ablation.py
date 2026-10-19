@@ -6,6 +6,8 @@ Trains and evaluates three configurations on ALL 15 categories:
   B. Structural only (AST, no GraphCodeBERT)
   C. Combined        (both streams fused) — the proposed model
 
+Uses per-configuration epoch counts so each model gets adequate training time.
+
 Reports accuracy and macro F1 on the full test set for each configuration.
 
 Output:
@@ -64,9 +66,17 @@ AST_FF_DIM = 512
 FUSION_HIDDEN = 256
 NUM_CATEGORIES = 15   # clean + 14 defect categories
 
-# Training
+# Training — per-configuration epoch counts
+# Semantic (GraphCodeBERT) converges fast — 5 epochs is enough
+# Structural (AST from scratch) converges slowly — 30 epochs to catch up
+# Combined also converges fast — 5 epochs
+CONFIG_EPOCHS = {
+    "Semantic only": 5,
+    "Structural only": 30,
+    "Combined": 5,
+}
+
 BATCH_SIZE = 16
-EPOCHS = 5
 LR_GCBERT = 2e-5
 LR_OTHER = 1e-3
 WEIGHT_DECAY = 0.01
@@ -355,9 +365,10 @@ def run_configuration(
     device,
     save_path: Path,
     category_map: dict,
+    config_epochs: int,
 ):
     print(f"\n{'='*60}")
-    print(f"Training configuration: {name}")
+    print(f"Training configuration: {name}  ({config_epochs} epochs)")
     print(f"{'='*60}\n")
 
     model = model.to(device)
@@ -365,13 +376,13 @@ def run_configuration(
     criterion = nn.CrossEntropyLoss()
 
     best_val_f1 = 0.0
-    for epoch in range(1, EPOCHS + 1):
+    for epoch in range(1, config_epochs + 1):
         t0 = time.time()
         train_loss, train_metrics = train_epoch(model, train_loader, optimizer, criterion, device)
         val_loss, val_metrics = evaluate(model, val_loader, criterion, device)
         elapsed = time.time() - t0
 
-        print(f"Epoch {epoch}/{EPOCHS}  ({elapsed:.1f}s)")
+        print(f"Epoch {epoch}/{config_epochs}  ({elapsed:.1f}s)")
         print(f"  train  loss={train_loss:.4f}  acc={train_metrics['accuracy']:.4f}  "
               f"macroF1={train_metrics['macro_f1']:.4f}")
         print(f"  val    loss={val_loss:.4f}  acc={val_metrics['accuracy']:.4f}  "
@@ -444,7 +455,7 @@ def main() -> int:
     val_loader = DataLoader(ExceptionDataset(val), batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
     test_loader = DataLoader(ExceptionDataset(test), batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
 
-    # Run three configurations
+    # Run three configurations with their own epoch counts
     results = []
 
     # Config A: Semantic only
@@ -454,15 +465,17 @@ def main() -> int:
         train_loader, val_loader, test_loader, device,
         MODELS_DIR / "ablation_semantic_15class.pt",
         category_map,
+        CONFIG_EPOCHS["Semantic only"],
     ))
 
-    # Config B: Structural only
+    # Config B: Structural only (30 epochs — was undertrained at 5)
     results.append(run_configuration(
         "Structural only",
         StructuralOnlyModel(ast_vocab_size=ast_vocab_size),
         train_loader, val_loader, test_loader, device,
         MODELS_DIR / "ablation_structural_15class.pt",
         category_map,
+        CONFIG_EPOCHS["Structural only"],
     ))
 
     # Config C: Combined
@@ -472,6 +485,7 @@ def main() -> int:
         train_loader, val_loader, test_loader, device,
         MODELS_DIR / "ablation_combined_15class.pt",
         category_map,
+        CONFIG_EPOCHS["Combined"],
     ))
 
     # Summary
