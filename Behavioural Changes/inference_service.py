@@ -22,7 +22,7 @@ from transformers import AutoTokenizer, T5ForConditionalGeneration
 
 from src.method_parser import MethodParser
 from src.signature_checker import SignatureChecker
-from src.llm_analyzer import BehavioralFingerprint
+from src.llm_analyzer import BehavioralFingerprint, map_categories_to_fingerprint
 from src.drift_engine import BehavioralDriftEngine
 from src.impact_assessor import ImpactAssessor
 from src.explanation import ExplanationGenerator
@@ -671,15 +671,17 @@ def analyze_pipeline(request: AnalyzeRequest):
     }
 
     # Stage 4: Behavioral Drift Engine
-    fp1 = BehavioralFingerprint(
+    fp1 = map_categories_to_fingerprint(
         method_name=v1_parsed.name,
         categories=validated["old_method"]["categories"],
         method_body=validated["old_method"]["method_body"],
+        raw_output=raw_output,
     )
-    fp2 = BehavioralFingerprint(
+    fp2 = map_categories_to_fingerprint(
         method_name=v2_parsed.name,
         categories=validated["new_method"]["categories"],
         method_body=validated["new_method"]["method_body"],
+        raw_output=raw_output,
     )
 
     drift_engine = BehavioralDriftEngine()
