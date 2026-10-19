@@ -1,10 +1,10 @@
 """
 Module: explanation.py
-Stage: LLM Explanation
+Stage: Developer Explanation & Regression Test Synthesis
 
 Synthesizes technical findings across all pipeline stages into a clear, developer-facing
-narrative. Leverages Groq Cloud LLM to produce deep semantic explanations,
-reproducing scenarios where same-signature drift manifests as runtime bugs.
+narrative and targeted JUnit regression test recommendations based on detected
+behavioral category shifts and drift dimensions. Does not require external APIs.
 """
 
 import os
@@ -13,7 +13,6 @@ import logging
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
-from groq import Groq
 
 from src.method_parser import JavaMethod
 from src.signature_checker import SignatureComparisonResult
@@ -42,22 +41,22 @@ class ExplanationReport(BaseModel):
 
 class ExplanationGenerator:
     """
-    Prompts Groq Cloud LLM to generate cohesive, actionable explanations of same-signature drift.
+    Synthesizes actionable explanations and JUnit regression test templates
+    from CodeT5 behavioral classifications, drift scores, and impact assessments.
+    Runs locally without external API dependencies.
     """
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        model_name: Optional[str] = None,
+        service_url: Optional[str] = None,
         timeout_seconds: int = 60,
-        temperature: float = 0.2,
-        client: Optional[Any] = None
+        api_key: Optional[str] = None,     # Kept for backward compatibility
+        model_name: Optional[str] = None,  # Kept for backward compatibility
+        temperature: float = 0.2,          # Kept for backward compatibility
+        client: Optional[Any] = None       # Kept for backward compatibility
     ):
-        self.api_key = api_key or os.getenv("GROQ_API_KEY", "")
-        self.model_name = model_name or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-        self.timeout_seconds = int(os.getenv("REQUEST_TIMEOUT_SECONDS", str(timeout_seconds)))
-        self.temperature = float(os.getenv("TEMPERATURE", str(temperature)))
-        self.client = client or (Groq(api_key=self.api_key) if self.api_key else None)
+        self.service_url = service_url or os.getenv("CODET5_SERVICE_URL", "http://localhost:8000")
+        self.timeout_seconds = timeout_seconds
 
     def generate_explanation(
         self,
@@ -68,90 +67,146 @@ class ExplanationGenerator:
         impact: ImpactAssessment
     ) -> ExplanationReport:
         """
-        Queries Groq Cloud LLM to generate an in-depth explanatory narrative and JUnit test suggestions.
+        Synthesizes an in-depth explanatory narrative and JUnit test suggestions
+        directly from the pipeline analysis.
         """
-        if not self.api_key:
-            raise ConnectionError("GROQ_API_KEY is not configured.")
+        method_name = v1.name
+        params_str = ", ".join(f"{p.type} {p.name}" for p in v1.parameters)
 
-        prompt = self._build_explanation_prompt(v1, v2, sig_result, drift_report, impact)
-        client = self.client or Groq(api_key=self.api_key)
-
-        try:
-            completion = client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are an expert senior Java architect and software governance researcher.\n"
-                            "Analyze behavioral drift between two versions of a Java method with identical signatures.\n"
-                            "You MUST return ONLY a valid JSON object matching the requested schema."
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
+        if not drift_report.drift_detected:
+            return ExplanationReport(
+                overview=f"Method `{method_name}` exhibits no detectable behavioral drift between baseline and modified implementations.",
+                detailed_drift_breakdown=(
+                    f"Both versions maintain identical behavioral classifications and execution contracts across all checked dimensions. "
+                    f"Signature: `{v1.signature_str}`."
+                ),
+                failure_scenarios=[
+                    "No divergent runtime execution paths identified."
                 ],
-                response_format={"type": "json_object"},
-                temperature=self.temperature,
-                timeout=self.timeout_seconds
-            )
-            raw_text = completion.choices[0].message.content or ""
-            return self._parse_explanation_response(raw_text, drift_report, impact)
-        except Exception as e:
-            logger.error(f"Error querying Groq for explanation: {e}")
-            raise ConnectionError(
-                f"Failed to query Groq Cloud using model '{self.model_name}' for explanation: {e}"
+                recommended_unit_tests=[
+                    f"""@Test
+void test{method_name}_Equivalence() {{
+    // Verify baseline and modified implementations yield identical outputs
+    // Method signature: {v1.return_type} {method_name}({params_str})
+}}"""
+                ],
+                developer_guidance="The refactoring appears behaviorally safe. Existing unit test suites should pass without regressions."
             )
 
-    def _build_explanation_prompt(
-        self,
-        v1: JavaMethod,
-        v2: JavaMethod,
-        sig_result: SignatureComparisonResult,
-        drift_report: DriftReport,
-        impact: ImpactAssessment
-    ) -> str:
-        """Creates the prompt guiding the LLM to explain the drift concisely and precisely."""
-        flagged_areas = ", ".join(drift_report.flagged_drift_areas) or "None detected"
+        # Flagged areas
+        flagged = drift_report.flagged_drift_areas
+        overview = (
+            f"Behavioral drift of severity **{drift_report.severity.value}** (Score: {drift_report.drift_score*100:.1f}%) "
+            f"detected in same-signature Java method `{method_name}`. "
+            f"Impact blast radius: **{impact.blast_radius.value}** with risk level **{impact.risk_level.value}**."
+        )
 
-        return f"""Analyze this behavioral drift between two versions of a Java method with IDENTICAL method signatures:
+        breakdown_lines = [
+            f"**Method:** `{v1.signature_str}`",
+            f"**Summary:** {drift_report.summary}",
+            f"**Backward Compatibility:** {'Intact' if impact.backward_compatibility_intact else 'COMPROMISED'}",
+            ""
+        ]
 
-METHOD SIGNATURE:
-{v1.signature_str}
+        failure_scenarios: List[str] = []
+        unit_tests: List[str] = []
 
-BASELINE VERSION (v1):
-```java
-{v1.raw_code}
-```
+        for delta in drift_report.dimension_deltas:
+            if not delta.has_drift:
+                continue
+            dim = delta.dimension
+            breakdown_lines.append(f"- **{dim.upper()}** (divergence weight: {delta.weight:.2f}):")
+            if delta.added_behaviors:
+                breakdown_lines.append(f"  - *Added in modified version:* {', '.join(delta.added_behaviors)}")
+            if delta.removed_behaviors:
+                breakdown_lines.append(f"  - *Removed from baseline:* {', '.join(delta.removed_behaviors)}")
 
-MODIFIED VERSION (v2):
-```java
-{v2.raw_code}
-```
+            # Tailor failure scenarios and JUnit tests
+            if "exception" in dim.lower():
+                failure_scenarios.append(
+                    f"Callers invoking `{method_name}` under edge conditions may encounter newly introduced exceptions "
+                    f"where previous versions returned safe fallbacks or handled errors silently."
+                )
+                unit_tests.append(
+                    f"""@Test
+void test{method_name}_ExceptionContract() {{
+    // Verify method properly handles edge inputs without unexpected exceptions
+    // Expected behavior under invalid inputs:
+    assertDoesNotThrow(() -> {{
+        // instance.{method_name}(...);
+    }});
+}}"""
+                )
 
-DETECTED DRIFT METRICS:
-- Drift Score: {drift_report.drift_score:.2f} (Severity: {drift_report.severity.value})
-- Affected Dimensions: {flagged_areas}
-- Risk Level: {impact.risk_level.value} (Blast Radius: {impact.blast_radius.value})
-- Backward Compatibility Intact: {impact.backward_compatibility_intact}
+            if "state" in dim.lower() or "mutation" in dim.lower():
+                failure_scenarios.append(
+                    f"Passing shared objects or mutable arguments into `{method_name}` may result in unexpected side-effects "
+                    f"or race conditions in concurrent caller threads."
+                )
+                unit_tests.append(
+                    f"""@Test
+void test{method_name}_StateImmutability() {{
+    // Verify caller arguments are not silently mutated
+    // Snapshot original state before call:
+    // instance.{method_name}(...);
+    // assertEquals(originalSnapshot, currentArgumentState);
+}}"""
+                )
 
-TASK:
-Provide a clear, technical explanation of the behavioral drift for code review.
-You MUST output ONLY a valid JSON object matching this schema:
-{{
-  "overview": "Concise 2-sentence summary of the core behavioral change.",
-  "detailed_drift_breakdown": "In-depth technical breakdown of logic changes and differences in side-effects or return values.",
-  "failure_scenarios": [
-    "Specific input example or edge case that will behave differently in v2 compared to v1"
-  ],
-  "recommended_unit_tests": [
-    "Suggested JUnit test case description or snippet asserting the behavioral contract"
-  ],
-  "developer_guidance": "Clear advice for developers modifying or consuming this method."
-}}
-"""
+            if "side_effect" in dim.lower():
+                failure_scenarios.append(
+                    f"External side effects (I/O, database persistence, logging, or remote integrations) diverge between versions, "
+                    f"potentially duplicating operations or omitting necessary audit traces."
+                )
+                unit_tests.append(
+                    f"""@Test
+void test{method_name}_SideEffects() {{
+    // Verify external service / repository interactions
+    // verify(repositoryMock, times(1)).operation(...);
+}}"""
+                )
+
+            if "precondition" in dim.lower():
+                failure_scenarios.append(
+                    f"Tightened validation or control flow checks in `{method_name}` may reject arguments previously accepted by baseline."
+                )
+                unit_tests.append(
+                    f"""@Test
+void test{method_name}_PreconditionBoundary() {{
+    // Test boundary conditions that previously succeeded
+    assertNotNull(instance.{method_name}(/* test boundaries */));
+}}"""
+                )
+
+        if not failure_scenarios:
+            failure_scenarios.append(
+                f"Computation logic or return formatting diverges, potentially affecting downstream business calculations."
+            )
+
+        if not unit_tests:
+            unit_tests.append(
+                f"""@Test
+void test{method_name}_RegressionGuard() {{
+    // Verify return computation consistency
+    {v1.return_type} result = instance.{method_name}(/* arguments */);
+    assertNotNull(result);
+}}"""
+            )
+
+        guidance = (
+            f"Review the {len(flagged)} affected behavioral dimension(s) ({', '.join(flagged)}). "
+            f"{impact.executive_summary} "
+            f"Deploy the suggested JUnit regression guards to detect unintended behavioral drift in CI/CD before merging."
+        )
+
+        return ExplanationReport(
+            overview=overview,
+            detailed_drift_breakdown="\n".join(breakdown_lines),
+            failure_scenarios=failure_scenarios,
+            recommended_unit_tests=unit_tests,
+            developer_guidance=guidance,
+            raw_llm_response="Generated deterministically by local CodeT5 behavioral governance pipeline."
+        )
 
     def _parse_explanation_response(
         self,
@@ -159,45 +214,23 @@ You MUST output ONLY a valid JSON object matching this schema:
         drift_report: DriftReport,
         impact: ImpactAssessment
     ) -> ExplanationReport:
-        """Parses LLM JSON response or provides fallback structured content."""
-        cleaned = raw_text.strip()
-
-        # Handle markdown fences
-        if "```" in cleaned:
-            parts = cleaned.split("```")
-            for part in parts:
-                candidate = part.strip()
-                if candidate.startswith("json"):
-                    candidate = candidate[4:].strip()
-                if candidate.startswith("{") and candidate.endswith("}"):
-                    cleaned = candidate
-                    break
-
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            cleaned = cleaned[start:end + 1]
-
+        """Helper to parse raw JSON if provided in legacy tests."""
         try:
-            data = json.loads(cleaned)
+            data = json.loads(raw_text)
             return ExplanationReport(
-                overview=data.get("overview", drift_report.summary),
+                overview=data.get("overview", "Analysis completed."),
                 detailed_drift_breakdown=data.get("detailed_drift_breakdown", ""),
                 failure_scenarios=data.get("failure_scenarios", []),
                 recommended_unit_tests=data.get("recommended_unit_tests", []),
-                developer_guidance=data.get("developer_guidance", impact.executive_summary),
+                developer_guidance=data.get("developer_guidance", ""),
                 raw_llm_response=raw_text
             )
-        except json.JSONDecodeError:
+        except Exception:
             return ExplanationReport(
-                overview=drift_report.summary,
-                detailed_drift_breakdown=raw_text,
-                failure_scenarios=[
-                    "See detailed breakdown above for edge conditions where behavior diverged."
-                ],
-                recommended_unit_tests=[
-                    "Implement regression tests verifying inputs across legacy boundary values."
-                ],
+                overview="Drift analysis completed.",
+                detailed_drift_breakdown=drift_report.summary,
+                failure_scenarios=[],
+                recommended_unit_tests=[],
                 developer_guidance=impact.executive_summary,
                 raw_llm_response=raw_text
             )

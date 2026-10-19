@@ -1,0 +1,577 @@
+import * as vscode from 'vscode';
+
+export class BehaviouralPanel {
+  private static currentPanel: vscode.WebviewPanel | undefined;
+
+  public static show(context: vscode.ExtensionContext) {
+    if (BehaviouralPanel.currentPanel) {
+      BehaviouralPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
+      return;
+    }
+
+    const panel = vscode.window.createWebviewPanel(
+      'behaviouralPanel',
+      'Behavioural Details',
+      vscode.ViewColumn.Beside,
+      { enableScripts: true, retainContextWhenHidden: true }
+    );
+
+    BehaviouralPanel.currentPanel = panel;
+    panel.onDidDispose(() => {
+      BehaviouralPanel.currentPanel = undefined;
+    });
+
+    panel.webview.html = BehaviouralPanel.getHtmlContent();
+
+    // Handle messages from the webview
+    panel.webview.onDidReceiveMessage(async (message) => {
+      switch (message.command) {
+        case 'checkHealth': {
+          const health = await BehaviouralPanel.checkServiceHealth();
+          panel.webview.postMessage({ command: 'healthStatus', data: health });
+          break;
+        }
+        case 'analyze': {
+          try {
+            const data = await BehaviouralPanel.analyzeMethods(message.oldMethod, message.newMethod);
+            panel.webview.postMessage({ command: 'analysisResult', success: true, data });
+          } catch (error: any) {
+            panel.webview.postMessage({
+              command: 'analysisResult',
+              success: false,
+              error: error.message || String(error)
+            });
+          }
+          break;
+        }
+      }
+    });
+  }
+
+  private static getServiceUrl(): string {
+    const config = vscode.workspace.getConfiguration('codeGovernance');
+    return (config.get<string>('behaviouralServiceUrl') || 'http://localhost:8000').replace(/\/$/, '');
+  }
+
+  private static async checkServiceHealth(): Promise<{ connected: boolean; details?: any; error?: string }> {
+    const url = `${this.getServiceUrl()}/health`;
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      if (response.ok) {
+        const data = await response.json();
+        return { connected: true, details: data };
+      }
+      return { connected: false, error: `Service HTTP ${response.status}` };
+    } catch (e: any) {
+      return { connected: false, error: e.message || 'Connection refused' };
+    }
+  }
+
+  private static async analyzeMethods(oldMethod: string, newMethod: string): Promise<any> {
+    const url = `${this.getServiceUrl()}/analyze`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old_method: oldMethod, new_method: newMethod }),
+      signal: AbortSignal.timeout(60000)
+    });
+
+    if (!response.ok) {
+      let errText = await response.text();
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson.detail) {
+          errText = typeof errJson.detail === 'string' ? errJson.detail : JSON.stringify(errJson.detail);
+        }
+      } catch (_) {}
+      throw new Error(`Inference service error (${response.status}): ${errText}`);
+    }
+
+    return await response.json();
+  }
+
+  private static getHtmlContent(): string {
+    return `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vscode/codicons/dist/codicon.css">
+        <style>
+          body {
+            background-color: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+            padding: 16px;
+            margin: 0;
+            box-sizing: border-box;
+          }
+          .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            padding-bottom: 12px;
+            margin-bottom: 16px;
+          }
+          .header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+          }
+          .header h2 { margin: 0; font-size: 15px; }
+          .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            background-color: var(--vscode-badge-background);
+            color: var(--vscode-badge-foreground);
+          }
+          .status-online { background-color: #1e3a2f; color: #4ade80; border: 1px solid #2e6047; }
+          .status-offline { background-color: #3d1f24; color: #f87171; border: 1px solid #652b32; }
+
+          .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            margin: 16px 0 8px 0;
+            color: var(--vscode-editorInfo-foreground);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+          }
+
+          .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 12px;
+          }
+
+          label {
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            display: block;
+            color: var(--vscode-descriptionForeground);
+          }
+
+          textarea, select {
+            width: 100%;
+            box-sizing: border-box;
+            background-color: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+            border-radius: 3px;
+            padding: 8px;
+            font-family: var(--vscode-editor-font-family, monospace);
+            font-size: 12px;
+            resize: vertical;
+          }
+          textarea:focus, select:focus {
+            outline: 1px solid var(--vscode-focusBorder);
+          }
+
+          .btn-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+          }
+
+          button.primary-btn {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border: none;
+            padding: 8px 16px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+          }
+          button.primary-btn:hover {
+            background-color: var(--vscode-button-hoverBackground);
+          }
+          button.primary-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+          }
+
+          button.secondary-btn {
+            background-color: var(--vscode-button-secondaryBackground, #3a3d41);
+            color: var(--vscode-button-secondaryForeground, #ffffff);
+            border: none;
+            padding: 8px 12px;
+            border-radius: 3px;
+            font-size: 12px;
+            cursor: pointer;
+          }
+
+          .issue-card {
+            background-color: var(--vscode-editorWidget-background);
+            border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 12px;
+          }
+          .tag {
+            background-color: var(--vscode-badge-background);
+            color: var(--vscode-badge-foreground);
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 3px;
+          }
+          .tag-high { background-color: #d9534f; color: #fff; }
+          .tag-med { background-color: #f0ad4e; color: #fff; }
+          .tag-low { background-color: #5cb85c; color: #fff; }
+
+          .code-box {
+            background-color: var(--vscode-textCodeBlock-background);
+            padding: 8px 10px;
+            border-radius: 3px;
+            font-family: var(--vscode-editor-font-family, monospace);
+            font-size: 12px;
+            margin-top: 8px;
+            border: 1px solid var(--vscode-panel-border);
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+          }
+
+          .chip-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin: 6px 0;
+          }
+          .cat-chip {
+            font-family: var(--vscode-editor-font-family, monospace);
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 3px;
+            background-color: var(--vscode-editorWidget-background);
+            border: 1px solid var(--vscode-panel-border);
+            font-weight: 600;
+          }
+          .chip-added { background-color: #1e3a2f; color: #4ade80; border-color: #2e6047; }
+          .chip-removed { background-color: #3d1f24; color: #f87171; border-color: #652b32; }
+          .chip-retained { background-color: #1e293b; color: #94a3b8; border-color: #334155; }
+
+          .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+          }
+          @keyframes spin { to { transform: rotate(360deg); } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="header-left">
+            <i class="codicon codicon-pulse" style="font-size: 18px; color: var(--vscode-editorInfo-foreground);"></i>
+            <h2>Behavioural Analysis Breakdown</h2>
+          </div>
+          <div id="serviceStatus" class="status-pill status-offline">
+            <i class="codicon codicon-radio-tower"></i>
+            <span id="statusText">Checking CodeT5...</span>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <label for="presetSelect">Load Preset Refactoring Scenario:</label>
+          <select id="presetSelect" onchange="loadPreset()">
+            <option value="001">Dataset #001: Files.copy -> updateStatus & deleteIfExists (DB Write Added)</option>
+            <option value="003">Dataset #003: findById -> writeString & findById (File Operation Added)</option>
+            <option value="004">Dataset #004: Added Null Check & IllegalArgumentException</option>
+            <option value="race">Race Condition Demonstration: CacheManager.java (Thread Mutation)</option>
+            <option value="custom">-- Custom Java Methods --</option>
+          </select>
+        </div>
+
+        <div class="grid-2">
+          <div>
+            <label for="oldMethodInput">Baseline Java Method (v1):</label>
+            <textarea id="oldMethodInput" rows="8"></textarea>
+          </div>
+          <div>
+            <label for="newMethodInput">Modified Java Method (v2):</label>
+            <textarea id="newMethodInput" rows="8"></textarea>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button id="runBtn" class="primary-btn" onclick="runAnalysis()">
+            <i class="codicon codicon-play"></i>
+            <span>Analyze with Fine-Tuned CodeT5</span>
+          </button>
+          <button class="secondary-btn" onclick="checkHealth()">
+            <i class="codicon codicon-refresh"></i> Refresh Status
+          </button>
+        </div>
+
+        <div id="errorBox" class="issue-card" style="display: none; border-color: #d9534f; background-color: rgba(217, 83, 79, 0.1);">
+          <strong style="color: #f87171;">Analysis Failed</strong>
+          <p id="errorMsg" style="font-size: 12px; margin: 6px 0 0 0;"></p>
+        </div>
+
+        <!-- Live CodeT5 Output Section -->
+        <div id="resultsSection" style="display: none;">
+          <div class="section-title">
+            <i class="codicon codicon-symbol-class"></i>
+            Fine-Tuned CodeT5 Behavioral Categories
+          </div>
+
+          <div class="grid-2">
+            <div class="issue-card">
+              <strong>Baseline Categories (v1)</strong>
+              <div id="oldCategories" class="chip-container"></div>
+              <div class="code-box" id="oldBodyBox"></div>
+            </div>
+            <div class="issue-card">
+              <strong>Modified Categories (v2)</strong>
+              <div id="newCategories" class="chip-container"></div>
+              <div class="code-box" id="newBodyBox"></div>
+            </div>
+          </div>
+
+          <div class="section-title">
+            <i class="codicon codicon-git-compare"></i>
+            Behavioral Drift Deltas
+          </div>
+          <div class="issue-card">
+            <div style="margin-bottom: 8px;">
+              <strong>Added Categories:</strong>
+              <div id="addedChips" class="chip-container"></div>
+            </div>
+            <div style="margin-bottom: 8px;">
+              <strong>Removed Categories:</strong>
+              <div id="removedChips" class="chip-container"></div>
+            </div>
+            <div>
+              <strong>Retained Categories:</strong>
+              <div id="retainedChips" class="chip-container"></div>
+            </div>
+          </div>
+
+          <div class="section-title">
+            <i class="codicon codicon-warning"></i>
+            Detected Governance Alerts
+          </div>
+          <div id="governanceAlerts"></div>
+        </div>
+
+        <!-- Static Fallback Card from Original Prototype UI -->
+        <div id="defaultCard" class="issue-card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <strong>Race Condition Detected</strong>
+            <span class="tag tag-high">High</span>
+          </div>
+          <p style="font-size: 12px; margin: 0; color: var(--vscode-descriptionForeground);">
+            Shared state accessed across worker threads without synchronization lock.
+          </p>
+          <div class="code-box">CacheManager.java &rarr; line 78</div>
+        </div>
+
+        <script>
+          const vscode = acquireVsCodeApi();
+
+          const PRESETS = {
+            "001": {
+              v1: "public Object buildInventoryItemSummary(InventoryItem item, Long itemId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    java.nio.file.Files.copy(path, backupPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);\\n    return \\\"INVENTORYITEM-\\\" + itemId;\\n}",
+              v2: "public Object buildInventoryItemSummary(InventoryItem item, Long itemId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    inventoryRepository.updateStatus(itemId, \\\"PENDING\\\");\\n    java.nio.file.Files.deleteIfExists(path);\\n    return String.valueOf(itemId);\\n}"
+            },
+            "003": {
+              v1: "public void processAccountFile(Account account, Long accountId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    accountRepository.findById(accountId);\\n}",
+              v2: "public void processAccountFile(Account account, Long accountId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    java.nio.file.Files.writeString(path, message);\\n    accountRepository.findById(accountId);\\n}"
+            },
+            "004": {
+              v1: "public void checkMessageRecordRequest(MessageRecord messageRecord, Long messageId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    logger.trace(\\\"MessageRecord operation started\\\");\\n    double averageAmount = amount / Math.max(quantity, 1);\\n}",
+              v2: "public void checkMessageRecordRequest(MessageRecord messageRecord, Long messageId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    logger.trace(\\\"MessageRecord operation started\\\");\\n    double averageAmount = amount / Math.max(quantity, 1);\\n    if (messageId == null) {\\n        throw new IllegalArgumentException(\\\"identifier is required\\\");\\n    }\\n}"
+            },
+            "race": {
+              v1: "public void updateCache(String key, Object val) {\\n    cacheMap.put(key, val);\\n}",
+              v2: "public void updateCache(String key, Object val) {\\n    // Race condition: unsynchronized state update across threads\\n    this.lastAccessTime = System.currentTimeMillis();\\n    cacheMap.put(key, val);\\n}"
+            }
+          };
+
+          function loadPreset() {
+            const key = document.getElementById('presetSelect').value;
+            if (PRESETS[key]) {
+              document.getElementById('oldMethodInput').value = PRESETS[key].v1;
+              document.getElementById('newMethodInput').value = PRESETS[key].v2;
+            }
+          }
+
+          function checkHealth() {
+            vscode.postMessage({ command: 'checkHealth' });
+          }
+
+          function runAnalysis() {
+            const oldMethod = document.getElementById('oldMethodInput').value.trim();
+            const newMethod = document.getElementById('newMethodInput').value.trim();
+
+            if (!oldMethod || !newMethod) {
+              showError("Please enter both baseline and modified Java methods.");
+              return;
+            }
+
+            document.getElementById('errorBox').style.display = 'none';
+            const btn = document.getElementById('runBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> <span>Running CodeT5...</span>';
+
+            vscode.postMessage({
+              command: 'analyze',
+              oldMethod,
+              newMethod
+            });
+          }
+
+          function showError(msg) {
+            document.getElementById('errorBox').style.display = 'block';
+            document.getElementById('errorMsg').innerText = msg;
+            const btn = document.getElementById('runBtn');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="codicon codicon-play"></i> <span>Analyze with Fine-Tuned CodeT5</span>';
+          }
+
+          function renderChips(containerId, list, extraClass) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            if (!list || list.length === 0) {
+              container.innerHTML = '<span style="font-size:11px; opacity:0.6;">None</span>';
+              return;
+            }
+            list.forEach(c => {
+              const span = document.createElement('span');
+              span.className = 'cat-chip ' + (extraClass || '');
+              span.innerText = c;
+              container.appendChild(span);
+            });
+          }
+
+          // Handle incoming messages from extension
+          window.addEventListener('message', event => {
+            const msg = event.data;
+            switch (msg.command) {
+              case 'healthStatus': {
+                const statusPill = document.getElementById('serviceStatus');
+                const statusText = document.getElementById('statusText');
+                if (msg.data && msg.data.connected) {
+                  statusPill.className = 'status-pill status-online';
+                  statusText.innerText = 'CodeT5 Online (' + (msg.data.details.device || 'Ready') + ')';
+                } else {
+                  statusPill.className = 'status-pill status-offline';
+                  statusText.innerText = 'CodeT5 Offline (Port 8000)';
+                }
+                break;
+              }
+              case 'analysisResult': {
+                const btn = document.getElementById('runBtn');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="codicon codicon-play"></i> <span>Analyze with Fine-Tuned CodeT5</span>';
+
+                if (!msg.success) {
+                  showError(msg.error);
+                  return;
+                }
+
+                const data = msg.data;
+                document.getElementById('defaultCard').style.display = 'none';
+                document.getElementById('resultsSection').style.display = 'block';
+
+                // Render categories
+                renderChips('oldCategories', data.old_method.categories, '');
+                renderChips('newCategories', data.new_method.categories, '');
+                document.getElementById('oldBodyBox').innerText = data.old_method.method_body;
+                document.getElementById('newBodyBox').innerText = data.new_method.method_body;
+
+                // Render comparison
+                const comp = data.comparison || {};
+                renderChips('addedChips', comp.added_categories, 'chip-added');
+                renderChips('removedChips', comp.removed_categories, 'chip-removed');
+                renderChips('retainedChips', comp.retained_categories, 'chip-retained');
+
+                // Render dynamic alerts
+                const alertsDiv = document.getElementById('governanceAlerts');
+                alertsDiv.innerHTML = '';
+
+                if (comp.drift_detected) {
+                  const added = comp.added_categories || [];
+                  if (added.includes('EXCEPTION_BEHAVIOR')) {
+                    alertsDiv.innerHTML += \`
+                      <div class="issue-card">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                          <strong>Unannounced Runtime Exception Injection</strong>
+                          <span class="tag tag-high">High</span>
+                        </div>
+                        <p style="font-size:12px; margin:4px 0; color:var(--vscode-descriptionForeground);">
+                          Modified implementation introduces exception behavior violating caller assumptions.
+                        </p>
+                      </div>
+                    \`;
+                  }
+                  if (added.includes('DATABASE_WRITE') || added.includes('FILE_OPERATION') || added.includes('EXTERNAL_CALL')) {
+                    alertsDiv.innerHTML += \`
+                      <div class="issue-card">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                          <strong>Unannounced External Side Effect</strong>
+                          <span class="tag tag-med">Medium</span>
+                        </div>
+                        <p style="font-size:12px; margin:4px 0; color:var(--vscode-descriptionForeground);">
+                          Method introduces side-effects (I/O, database writes, or remote calls) absent in baseline version.
+                        </p>
+                      </div>
+                    \`;
+                  }
+                  if (added.includes('STATE_MUTATION')) {
+                    alertsDiv.innerHTML += \`
+                      <div class="issue-card">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                          <strong>State Mutation Detected</strong>
+                          <span class="tag tag-med">Medium</span>
+                        </div>
+                        <p style="font-size:12px; margin:4px 0; color:var(--vscode-descriptionForeground);">
+                          Object state mutated without synchronization or announced contract change.
+                        </p>
+                      </div>
+                    \`;
+                  }
+                } else {
+                  alertsDiv.innerHTML = \`
+                    <div class="issue-card">
+                      <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <strong>Behavioral Integrity Maintained</strong>
+                        <span class="tag tag-low">Passed</span>
+                      </div>
+                      <p style="font-size:12px; margin:4px 0; color:var(--vscode-descriptionForeground);">
+                        No behavioral divergence detected. All behavioral categories match baseline.
+                      </p>
+                    </div>
+                  \`;
+                }
+
+                break;
+              }
+            }
+          });
+
+          // Initialize with preset 001 and check health
+          loadPreset();
+          checkHealth();
+        </script>
+      </body>
+      </html>
+    `;
+  }
+}

@@ -2,11 +2,11 @@
 Behavioral Drift Detection in Same-Signature Java Methods
 Streamlit Demonstration Dashboard
 
-Stage: UI Feedback
-Integrates the full research pipeline:
-Java Method Input → Same-Signature Verification → LLM Semantic Analyzer (Groq Cloud) →
-Behavioral Fingerprinting → Behavioral Drift Engine → Impact Assessment →
-LLM Explanation (Groq Cloud) → UI Feedback
+Stage: UI Feedback & Governance Pipeline
+Integrates the complete local research pipeline:
+Java Method Input → Same-Signature Verification → Local CodeT5 Inference (Salesforce/codet5-small) →
+Behavioral Category Analysis → Behavioral Drift Engine → Impact Assessment →
+Developer Explanation & JUnit Generation → UI Feedback
 """
 
 import streamlit as st
@@ -26,7 +26,7 @@ load_dotenv()
 
 # Page configuration
 st.set_page_config(
-    page_title="Behavioral Drift Detector | Java Methods",
+    page_title="Behavioral Drift Detector | Fine-Tuned CodeT5",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -47,11 +47,72 @@ st.markdown("""
     .badge-medium { color: #fff; background-color: #0275d8; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
     .badge-low { color: #fff; background-color: #5cb85c; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
     .badge-none { color: #fff; background-color: #6c757d; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
+    .cat-badge {
+        display: inline-block;
+        background-color: #2b3a4a;
+        color: #61dafb;
+        padding: 3px 8px;
+        border-radius: 4px;
+        margin-right: 6px;
+        margin-bottom: 4px;
+        font-family: monospace;
+        font-size: 12px;
+        font-weight: 600;
+        border: 1px solid #3d5166;
+    }
+    .cat-added {
+        background-color: #1e3a2f;
+        color: #4ade80;
+        border-color: #2e6047;
+    }
+    .cat-removed {
+        background-color: #3d1f24;
+        color: #f87171;
+        border-color: #652b32;
+    }
+    .cat-retained {
+        background-color: #1e293b;
+        color: #94a3b8;
+        border-color: #334155;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # Preset Test Cases for Demonstration
 PRESET_CASES = {
+    "Dataset Example 001: File Copy -> DB Status & Delete": {
+        "v1": """public Object buildInventoryItemSummary(InventoryItem item, Long itemId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {
+    java.nio.file.Files.copy(path, backupPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    return "INVENTORYITEM-" + itemId;
+}""",
+        "v2": """public Object buildInventoryItemSummary(InventoryItem item, Long itemId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {
+    inventoryRepository.updateStatus(itemId, "PENDING");
+    java.nio.file.Files.deleteIfExists(path);
+    return String.valueOf(itemId);
+}"""
+    },
+    "Dataset Example 003: Account Read -> File Write Added": {
+        "v1": """public void processAccountFile(Account account, Long accountId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {
+    accountRepository.findById(accountId);
+}""",
+        "v2": """public void processAccountFile(Account account, Long accountId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {
+    java.nio.file.Files.writeString(path, message);
+    accountRepository.findById(accountId);
+}"""
+    },
+    "Dataset Example 004: Validation & Exception Behavior Added": {
+        "v1": """public void checkMessageRecordRequest(MessageRecord messageRecord, Long messageId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {
+    logger.trace("MessageRecord operation started");
+    double averageAmount = amount / Math.max(quantity, 1);
+}""",
+        "v2": """public void checkMessageRecordRequest(MessageRecord messageRecord, Long messageId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {
+    logger.trace("MessageRecord operation started");
+    double averageAmount = amount / Math.max(quantity, 1);
+    if (messageId == null) {
+        throw new IllegalArgumentException("identifier is required");
+    }
+}"""
+    },
     "Case 1: Silent Boundary Logic Drift": {
         "v1": """public double calculateDiscount(double price, int customerTier) {
     if (price <= 0) {
@@ -116,58 +177,46 @@ PRESET_CASES = {
 }
 
 
+def render_badges(categories, badge_class="cat-badge"):
+    if not categories:
+        return "<em>None detected</em>"
+    return " ".join([f'<span class="{badge_class}">{c}</span>' for c in categories])
+
+
 def main():
     st.title("🔍 Behavioral Drift Detection in Same-Signature Java Methods")
-    st.caption("Research Component | J26-SE-361 Code Governance Microservice | Powered by Groq Cloud")
+    st.caption("Local AI Pipeline | Powered by Fine-Tuned CodeT5 (`Salesforce/codet5-small`) | J26-SE-361 Code Governance")
 
-    # Sidebar: Configuration & LLM Health
+    # Sidebar: Local Model Configuration & Health
     with st.sidebar:
-        st.header("⚡ Groq Cloud LLM")
-        
-        default_key = os.getenv("GROQ_API_KEY", "")
-        groq_api_key = st.text_input(
-            "Groq API Key",
-            value=default_key,
-            type="password",
-            help="Groq API Key (loaded from .env if present)"
-        )
+        st.header("⚡ Local CodeT5 Service")
+        st.info("Operating entirely offline on local hardware. No Groq API key or external cloud APIs required.")
 
-        groq_models = [
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-            "llama-3.1-70b-versatile",
-            "mixtral-8x7b-32768",
-            "gemma2-9b-it"
-        ]
-        default_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-        default_idx = groq_models.index(default_model) if default_model in groq_models else 0
-
-        model_name = st.selectbox(
-            "Groq Model",
-            options=groq_models,
-            index=default_idx,
-            help="Recommended: llama-3.3-70b-versatile for code and reasoning"
+        default_service_url = os.getenv("CODET5_SERVICE_URL", "http://localhost:8000")
+        service_url = st.text_input(
+            "Service URL",
+            value=default_service_url,
+            help="URL where 'inference_service.py' is running (default: http://localhost:8000)"
         )
 
         timeout = st.slider("Request Timeout (sec)", min_value=10, max_value=180, value=60)
-        temp = st.slider("Temperature", min_value=0.0, max_value=1.0, value=0.1, step=0.05)
 
         analyzer = LLMSemanticAnalyzer(
-            api_key=groq_api_key,
-            model_name=model_name,
-            timeout_seconds=timeout,
-            temperature=temp
+            service_url=service_url,
+            timeout_seconds=timeout
         )
 
         st.markdown("---")
-        st.subheader("Groq API Status")
-        if st.button("Check Groq Connection"):
-            with st.spinner("Connecting to Groq Cloud..."):
+        st.subheader("Model Service Health")
+        if st.button("Check Service Connection"):
+            with st.spinner(f"Connecting to {service_url}..."):
                 status = analyzer.check_connection()
                 if status.get("connected"):
-                    st.success(f"Connected to Groq Cloud! Model `{model_name}` is available.")
+                    st.success(f"Connected to Local CodeT5! Device: `{status.get('device')}`")
+                    st.caption(f"Model Path: `{status.get('model_path')}`")
                 else:
                     st.error(f"Connection failed: {status.get('error')}")
+                    st.warning("To start the local inference service, run:\n`python inference_service.py`")
 
         st.markdown("---")
         st.subheader("Load Preset Scenario")
@@ -199,7 +248,7 @@ def main():
     run_btn = st.button("🚀 Run Behavioral Drift Analysis Pipeline", type="primary", use_container_width=True)
 
     if run_btn:
-        pipeline_progress = st.status("Running Behavioral Drift Detection Pipeline via Groq Cloud...", expanded=True)
+        pipeline_progress = st.status("Running Behavioral Drift Detection Pipeline via Local CodeT5...", expanded=True)
 
         # STAGE 1: Method Parsing
         pipeline_progress.write("Stage 1: Parsing Java Methods (AST & Signature Extraction)...")
@@ -224,45 +273,51 @@ def main():
             pipeline_progress.update(label="Analysis Halted: Signature Mismatch", state="error")
             return
 
-        # STAGE 3 & 4: LLM Semantic Analysis & Behavioral Fingerprinting
-        pipeline_progress.write(f"Stage 3 & 4: Extracting Semantic Fingerprints via Groq (`{model_name}`)...")
+        # STAGE 3 & 4: Local CodeT5 Behavioral Classification
+        pipeline_progress.write("Stage 3 & 4: Classifying Behavioral Categories via Fine-Tuned CodeT5...")
         try:
-            with st.spinner("Extracting behavioral fingerprints via Groq Cloud..."):
-                fp1 = analyzer.extract_fingerprint(v1_parsed)
-                fp2 = analyzer.extract_fingerprint(v2_parsed)
+            with st.spinner("Executing local CodeT5 inference..."):
+                fp1, fp2, comparison = analyzer.extract_pair_fingerprints(v1_parsed, v2_parsed)
         except Exception as e:
-            pipeline_progress.update(label="Groq Analysis Failed", state="error")
-            st.error(f"Failed to extract fingerprints from Groq: {e}")
-            st.warning("Please verify your Groq API key in the sidebar or in the `.env` file.")
+            pipeline_progress.update(label="Local CodeT5 Analysis Failed", state="error")
+            st.error(f"Failed to query local CodeT5 service: {e}")
+            st.warning("Please ensure the FastAPI service is running locally:\n`python inference_service.py`")
             return
 
         st.markdown("---")
-        st.subheader("3. Behavioral Fingerprint Comparison")
-        f_col1, f_col2 = st.columns(2)
-        with f_col1:
-            st.markdown("##### 🧬 Baseline Fingerprint (v1)")
-            st.json({
-                "Preconditions": fp1.preconditions,
-                "Postconditions": fp1.postconditions,
-                "State Mutations": fp1.state_mutations,
-                "Side Effects": fp1.side_effects,
-                "Exceptions Thrown": fp1.exceptions_thrown,
-                "Return Behavior": fp1.return_behavior
-            })
+        st.subheader("3. Fine-Tuned CodeT5 Behavioral Categories & Extracted Bodies")
 
-        with f_col2:
-            st.markdown("##### 🧬 Modified Fingerprint (v2)")
-            st.json({
-                "Preconditions": fp2.preconditions,
-                "Postconditions": fp2.postconditions,
-                "State Mutations": fp2.state_mutations,
-                "Side Effects": fp2.side_effects,
-                "Exceptions Thrown": fp2.exceptions_thrown,
-                "Return Behavior": fp2.return_behavior
-            })
+        cat_col1, cat_col2 = st.columns(2)
+        with cat_col1:
+            st.markdown("##### 🏷️ Baseline Categories (v1)")
+            st.markdown(render_badges(fp1.categories), unsafe_allow_html=True)
+            with st.expander("Extracted Baseline Method Body"):
+                st.code(fp1.method_body if fp1.method_body else "/* empty body */", language="java")
+
+        with cat_col2:
+            st.markdown("##### 🏷️ Modified Categories (v2)")
+            st.markdown(render_badges(fp2.categories), unsafe_allow_html=True)
+            with st.expander("Extracted Modified Method Body"):
+                st.code(fp2.method_body if fp2.method_body else "/* empty body */", language="java")
+
+        # Category Deltas
+        st.markdown("##### 📊 Behavioral Category Changes (v1 → v2)")
+        d_col1, d_col2, d_col3 = st.columns(3)
+        with d_col1:
+            added = comparison.get("added_categories", [])
+            st.markdown(f"**➕ Added in v2 ({len(added)}):**")
+            st.markdown(render_badges(added, "cat-badge cat-added"), unsafe_allow_html=True)
+        with d_col2:
+            removed = comparison.get("removed_categories", [])
+            st.markdown(f"**➖ Removed from v1 ({len(removed)}):**")
+            st.markdown(render_badges(removed, "cat-badge cat-removed"), unsafe_allow_html=True)
+        with d_col3:
+            retained = comparison.get("retained_categories", [])
+            st.markdown(f"**🔁 Retained in Both ({len(retained)}):**")
+            st.markdown(render_badges(retained, "cat-badge cat-retained"), unsafe_allow_html=True)
 
         # STAGE 5: Behavioral Drift Engine
-        pipeline_progress.write("Stage 5: Computing Behavioral Drift Metrics...")
+        pipeline_progress.write("Stage 5: Computing Multi-Dimensional Behavioral Drift Metrics...")
         drift_engine = BehavioralDriftEngine()
         drift_report = drift_engine.analyze(fp1, fp2)
 
@@ -321,40 +376,29 @@ def main():
             for m in impact.recommended_mitigations:
                 st.markdown(f"- {m}")
 
-        # STAGE 7: LLM Explanation
-        pipeline_progress.write(f"Stage 7: Generating Technical Narrative & Test Recommendations via Groq (`{model_name}`)...")
-        explainer = ExplanationGenerator(
-            api_key=groq_api_key,
-            model_name=model_name,
-            timeout_seconds=timeout,
-            temperature=temp
-        )
-        try:
-            with st.spinner("Synthesizing developer explanation via Groq Cloud..."):
-                explanation = explainer.generate_explanation(v1_parsed, v2_parsed, sig_result, drift_report, impact)
-        except Exception as e:
-            st.warning(f"Could not generate deep LLM explanation: {e}")
-            explanation = None
+        # STAGE 7: Developer Explanation & JUnit Tests
+        pipeline_progress.write("Stage 7: Synthesizing Developer Explanation & JUnit Regression Tests...")
+        explainer = ExplanationGenerator()
+        explanation = explainer.generate_explanation(v1_parsed, v2_parsed, sig_result, drift_report, impact)
 
         st.markdown("---")
-        st.subheader("6. LLM Behavioral Explanation & Developer Guidance")
-        if explanation:
-            st.info(f"**Overview:** {explanation.overview}")
-            st.markdown("##### 🔬 Deep Technical Breakdown")
-            st.write(explanation.detailed_drift_breakdown)
+        st.subheader("6. Developer Guidance & Regression Test Generation")
+        st.info(f"**Overview:** {explanation.overview}")
+        st.markdown("##### 🔬 Technical Breakdown")
+        st.write(explanation.detailed_drift_breakdown)
 
-            if explanation.failure_scenarios:
-                st.markdown("##### ⚡ Divergent Runtime Scenarios (Failure Modes):")
-                for s in explanation.failure_scenarios:
-                    st.markdown(f"- {s}")
+        if explanation.failure_scenarios:
+            st.markdown("##### ⚡ Divergent Runtime Scenarios (Failure Modes):")
+            for s in explanation.failure_scenarios:
+                st.markdown(f"- {s}")
 
-            if explanation.recommended_unit_tests:
-                st.markdown("##### 🧪 Suggested JUnit Tests to Detect Drift:")
-                for t in explanation.recommended_unit_tests:
-                    st.code(t, language="java")
+        if explanation.recommended_unit_tests:
+            st.markdown("##### 🧪 Suggested JUnit Tests to Guard Against Drift:")
+            for t in explanation.recommended_unit_tests:
+                st.code(t, language="java")
 
-            st.markdown("##### 💡 Developer Guidance:")
-            st.write(explanation.developer_guidance)
+        st.markdown("##### 💡 Developer Guidance:")
+        st.write(explanation.developer_guidance)
 
         pipeline_progress.update(label="Behavioral Drift Analysis Complete!", state="complete")
 
