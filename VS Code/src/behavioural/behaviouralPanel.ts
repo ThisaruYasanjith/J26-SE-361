@@ -610,6 +610,41 @@ export class BehaviouralPanel {
             </details>
           </div>
 
+          <!-- Stage 5: Impact & Architectural Blast Radius Assessment -->
+          <div class="section-title">
+            <i class="codicon codicon-shield"></i>
+            5. Impact & Architectural Blast Radius Assessment
+          </div>
+          <div class="grid-3" style="margin-bottom: 12px;">
+            <div class="stat-card">
+              <div class="stat-card-title">Systemic Risk Level</div>
+              <div class="stat-card-val"><span id="riskLevelBadge" class="badge-none">NONE</span></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-title">Blast Radius Scope</div>
+              <div class="stat-card-val" id="blastRadiusVal" style="font-size: 14px;">LOCAL</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-title">Backward Compatibility</div>
+              <div class="stat-card-val" id="backwardCompatVal" style="font-size: 14px; color: #4ade80;">INTACT</div>
+            </div>
+          </div>
+
+          <div class="issue-card" style="margin-bottom: 12px;">
+            <p style="margin: 0 0 6px 0; font-size: 12px;"><strong>Executive Impact Assessment:</strong> <span id="execSummaryText">None</span></p>
+            <p style="margin: 0 0 8px 0; font-size: 12px;"><strong>Silent Bug Vulnerability:</strong> <span id="silentRiskText">None</span></p>
+
+            <div id="archRisksSection" style="display: none; margin-top: 8px;">
+              <strong style="font-size: 12px; color: #f87171;">🚨 Architectural Risks:</strong>
+              <div id="archRisksList" style="margin-top: 4px; font-size: 12px;"></div>
+            </div>
+
+            <div id="mitigationsSection" style="display: none; margin-top: 8px;">
+              <strong style="font-size: 12px; color: #38bdf8;">🛡️ Recommended Mitigations:</strong>
+              <div id="mitigationsList" style="margin-top: 4px; font-size: 12px;"></div>
+            </div>
+          </div>
+
           <div class="section-title">
             <i class="codicon codicon-warning"></i>
             Detected Governance Alerts
@@ -871,6 +906,47 @@ export class BehaviouralPanel {
                       \${detailHtml}
                     </div>\`;
                   });
+                }
+
+                // Render Stage 5: Impact & Architectural Blast Radius Assessment
+                const s5 = data.stage5_impact;
+                if (s5) {
+                  const risk = (s5.risk_level || 'LOW').toUpperCase();
+                  const riskBadge = document.getElementById('riskLevelBadge');
+                  riskBadge.innerText = risk;
+                  riskBadge.className = risk === 'CRITICAL' ? 'badge-critical' :
+                                        risk === 'HIGH' ? 'badge-high' :
+                                        risk === 'MEDIUM' ? 'badge-medium' :
+                                        risk === 'LOW' ? 'badge-low' : 'badge-none';
+
+                  const blastVal = document.getElementById('blastRadiusVal');
+                  blastVal.innerText = s5.blast_radius || 'LOCAL';
+
+                  const compatVal = document.getElementById('backwardCompatVal');
+                  const compatIntact = s5.backward_compatibility_intact;
+                  compatVal.innerText = compatIntact ? 'INTACT' : 'COMPROMISED';
+                  compatVal.style.color = compatIntact ? '#4ade80' : '#f87171';
+
+                  document.getElementById('execSummaryText').innerText = s5.executive_summary || 'N/A';
+                  document.getElementById('silentRiskText').innerText = s5.silent_regression_risk || 'N/A';
+
+                  const archSec = document.getElementById('archRisksSection');
+                  const archList = document.getElementById('archRisksList');
+                  if (s5.architectural_risks && s5.architectural_risks.length > 0) {
+                    archSec.style.display = 'block';
+                    archList.innerHTML = s5.architectural_risks.map(r => \`<div style="margin-bottom: 3px;">• \${r}</div>\`).join('');
+                  } else {
+                    archSec.style.display = 'none';
+                  }
+
+                  const mitSec = document.getElementById('mitigationsSection');
+                  const mitList = document.getElementById('mitigationsList');
+                  if (s5.recommended_mitigations && s5.recommended_mitigations.length > 0) {
+                    mitSec.style.display = 'block';
+                    mitList.innerHTML = s5.recommended_mitigations.map(m => \`<div style="margin-bottom: 3px;">• \${m}</div>\`).join('');
+                  } else {
+                    mitSec.style.display = 'none';
+                  }
                 }
 
                 // Render dynamic alerts
