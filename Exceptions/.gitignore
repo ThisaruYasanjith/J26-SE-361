@@ -1,4 +1,6 @@
+# ============================================================
 # Python
+# ============================================================
 __pycache__/
 *.py[cod]
 *.pyo
@@ -20,7 +22,10 @@ Thumbs.db
 .env
 .env.*
 
-# eBugs dataset
+# ============================================================
+# Large data — exclude from git
+# ============================================================
+# eBugs dataset (optional — decide if you want to track it)
 data/raw/
 data/processed/
 
@@ -29,11 +34,30 @@ repositories/
 repos/
 projects/
 
-# Generated results
-results/
+# ============================================================
+# Model artifacts — exclude ALL subfolders
+# ============================================================
+models/**/*.pt
+models/**/*.pth
+models/**/*.bin
+models/**/*.ckpt
+models/**/*.safetensors
+
+# ============================================================
+# Results — track CSVs and figures, ignore caches
+# ============================================================
+# KEEP results/ tracked (the CSVs and figures are thesis deliverables)
+results/**/*.cache
+results/**/*.tmp
+
+# ============================================================
+# Temporary / generated files
+# ============================================================
 logs/
 tmp/
 temp/
+*.log
+record.json
 
 # Jupyter
 .ipynb_checkpoints/
@@ -47,10 +71,3 @@ out/
 # Python build artifacts
 dist/
 *.egg-info/
-
-# Model artifacts
-models/*.pt
-models/*.pth
-models/*.bin
-models/*.ckpt
-models/*.safetensors
