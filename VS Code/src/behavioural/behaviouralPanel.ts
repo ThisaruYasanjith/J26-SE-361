@@ -1,7 +1,10 @@
 import * as vscode from 'vscode';
+import { JavaMethodUtils } from './javaMethodUtils';
 
 export class BehaviouralPanel {
   private static currentPanel: vscode.WebviewPanel | undefined;
+  private static trackedDocUri: vscode.Uri | undefined;
+  private static trackedMethodName: string | undefined;
 
   public static show(context: vscode.ExtensionContext) {
     if (BehaviouralPanel.currentPanel) {
@@ -17,7 +20,34 @@ export class BehaviouralPanel {
     );
 
     BehaviouralPanel.currentPanel = panel;
+
+    // Document Save Listener: Auto-detects saved refactored method and updates v2 box
+    const saveListener = vscode.workspace.onDidSaveTextDocument((doc) => {
+      if (!BehaviouralPanel.currentPanel) {
+        return;
+      }
+      if (!doc.fileName.endsWith('.java') && doc.languageId !== 'java') {
+        return;
+      }
+      if (BehaviouralPanel.trackedMethodName) {
+        const refactored = JavaMethodUtils.findMethodByName(doc, BehaviouralPanel.trackedMethodName);
+        if (refactored) {
+          BehaviouralPanel.currentPanel.webview.postMessage({
+            command: 'autoCapturedRefactoredMethod',
+            methodCode: refactored.fullCode,
+            methodName: refactored.name,
+            signature: refactored.signature,
+            fileName: doc.fileName.split(/[/\\]/).pop(),
+          });
+          vscode.window.showInformationMessage(
+            `✨ Refactored method "${refactored.name}" auto-captured on Save into Modified (v2)!`
+          );
+        }
+      }
+    });
+
     panel.onDidDispose(() => {
+      saveListener.dispose();
       BehaviouralPanel.currentPanel = undefined;
     });
 
@@ -29,6 +59,14 @@ export class BehaviouralPanel {
         case 'checkHealth': {
           const health = await BehaviouralPanel.checkServiceHealth();
           panel.webview.postMessage({ command: 'healthStatus', data: health });
+          break;
+        }
+        case 'captureBaselineFromEditor': {
+          BehaviouralPanel.captureFromActiveEditor(context, 'v1');
+          break;
+        }
+        case 'captureModifiedFromEditor': {
+          BehaviouralPanel.captureFromActiveEditor(context, 'v2');
           break;
         }
         case 'analyze': {
@@ -46,6 +84,52 @@ export class BehaviouralPanel {
         }
       }
     });
+  }
+
+  public static captureFromActiveEditor(context: vscode.ExtensionContext, target: 'v1' | 'v2'): void {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showWarningMessage('No active editor. Please open a Java file first.');
+      return;
+    }
+    const doc = editor.document;
+    if (!doc.fileName.endsWith('.java') && doc.languageId !== 'java') {
+      vscode.window.showWarningMessage('Active file is not a Java document.');
+      return;
+    }
+
+    const method = JavaMethodUtils.extractFromSelectionOrCursor(doc, editor.selection);
+    if (!method) {
+      vscode.window.showWarningMessage('Could not detect a Java method at selection/cursor. Please select the method declaration or body.');
+      return;
+    }
+
+    // Ensure the panel is visible
+    BehaviouralPanel.show(context);
+
+    const fileName = doc.fileName.split(/[/\\]/).pop() || 'Editor';
+
+    if (target === 'v1') {
+      BehaviouralPanel.trackedDocUri = doc.uri;
+      BehaviouralPanel.trackedMethodName = method.name;
+      BehaviouralPanel.currentPanel?.webview.postMessage({
+        command: 'updateBaselineMethod',
+        methodCode: method.fullCode,
+        methodName: method.name,
+        signature: method.signature,
+        fileName: fileName,
+      });
+      vscode.window.showInformationMessage(`Baseline (v1) captured: "${method.name}". Now refactor and save file to auto-populate Modified (v2)!`);
+    } else {
+      BehaviouralPanel.currentPanel?.webview.postMessage({
+        command: 'updateModifiedMethod',
+        methodCode: method.fullCode,
+        methodName: method.name,
+        signature: method.signature,
+        fileName: fileName,
+      });
+      vscode.window.showInformationMessage(`Modified (v2) captured: "${method.name}".`);
+    }
   }
 
   private static getServiceUrl(): string {
@@ -68,7 +152,7 @@ export class BehaviouralPanel {
   }
 
   private static async analyzeMethods(oldMethod: string, newMethod: string): Promise<any> {
-    const url = `${this.getServiceUrl()}/analyze`;
+    const url = `${this.getServiceUrl()}/analyze_pipeline`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

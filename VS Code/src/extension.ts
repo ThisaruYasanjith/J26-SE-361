@@ -26,6 +26,12 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("analyzer.openRuntime", () => {
       RuntimePanel.show(context);
     }),
+    vscode.commands.registerCommand("analyzer.captureBaselineMethod", () => {
+      BehaviouralPanel.captureFromActiveEditor(context, "v1");
+    }),
+    vscode.commands.registerCommand("analyzer.captureModifiedMethod", () => {
+      BehaviouralPanel.captureFromActiveEditor(context, "v2");
+    }),
   );
 }
 

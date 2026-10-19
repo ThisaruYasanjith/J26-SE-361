@@ -47,8 +47,30 @@
       {
         "command": "analyzer.openRuntime",
         "title": "Open Runtime Analysis"
+      },
+      {
+        "command": "analyzer.captureBaselineMethod",
+        "title": "Code Analyzer: Set as Baseline Method (v1)"
+      },
+      {
+        "command": "analyzer.captureModifiedMethod",
+        "title": "Code Analyzer: Set as Modified Method (v2)"
       }
-    ]
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "analyzer.captureBaselineMethod",
+          "when": "resourceExtname == .java",
+          "group": "codeAnalyzer@1"
+        },
+        {
+          "command": "analyzer.captureModifiedMethod",
+          "when": "resourceExtname == .java",
+          "group": "codeAnalyzer@2"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
