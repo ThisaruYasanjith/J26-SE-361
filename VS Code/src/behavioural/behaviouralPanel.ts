@@ -447,16 +447,7 @@ export class BehaviouralPanel {
           </div>
         </div>
 
-        <div style="margin-bottom: 12px;">
-          <label for="presetSelect">Load Preset Refactoring Scenario:</label>
-          <select id="presetSelect" onchange="loadPreset()">
-            <option value="001">Dataset #001: Files.copy -> updateStatus & deleteIfExists (DB Write Added)</option>
-            <option value="003">Dataset #003: findById -> writeString & findById (File Operation Added)</option>
-            <option value="004">Dataset #004: Added Null Check & IllegalArgumentException (Exception Added)</option>
-            <option value="mismatch">Negative Test: calculateFee (Mismatched Parameter Signature)</option>
-            <option value="custom">-- Custom Java Methods (Capture from Editor) --</option>
-          </select>
-        </div>
+
 
         <div id="autoCaptureBanner" class="issue-card" style="display:none; background-color: rgba(74, 222, 128, 0.12); border-color: #2e6047; margin-bottom: 12px;">
           <div style="display: flex; align-items: center; justify-content: space-between;">
@@ -477,7 +468,7 @@ export class BehaviouralPanel {
                 <i class="codicon codicon-arrow-down"></i> Capture Selection
               </button>
             </div>
-            <textarea id="oldMethodInput" rows="8"></textarea>
+            <textarea id="oldMethodInput" rows="8" placeholder="Select a method in editor and click 'Capture Selection' or paste baseline code here..."></textarea>
             <div id="v1Meta" style="display: none; font-size: 11px; color: var(--vscode-editorInfo-foreground); margin-top: 4px;"></div>
           </div>
           <div>
@@ -487,7 +478,7 @@ export class BehaviouralPanel {
                 <i class="codicon codicon-arrow-down"></i> Capture Current
               </button>
             </div>
-            <textarea id="newMethodInput" rows="8"></textarea>
+            <textarea id="newMethodInput" rows="8" placeholder="Edit and save in editor to auto-capture or paste modified code here..."></textarea>
             <div id="v2Meta" style="display: none; font-size: 11px; color: var(--vscode-editorInfo-foreground); margin-top: 4px;"></div>
           </div>
         </div>
@@ -697,32 +688,7 @@ export class BehaviouralPanel {
         <script>
           const vscode = acquireVsCodeApi();
 
-          const PRESETS = {
-            "001": {
-              v1: "public Object buildInventoryItemSummary(InventoryItem item, Long itemId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    java.nio.file.Files.copy(path, backupPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);\\n    return \\\"INVENTORYITEM-\\\" + itemId;\\n}",
-              v2: "public Object buildInventoryItemSummary(InventoryItem item, Long itemId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    inventoryRepository.updateStatus(itemId, \\\"PENDING\\\");\\n    java.nio.file.Files.deleteIfExists(path);\\n    return String.valueOf(itemId);\\n}"
-            },
-            "003": {
-              v1: "public void processAccountFile(Account account, Long accountId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    accountRepository.findById(accountId);\\n}",
-              v2: "public void processAccountFile(Account account, Long accountId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    java.nio.file.Files.writeString(path, message);\\n    accountRepository.findById(accountId);\\n}"
-            },
-            "004": {
-              v1: "public void checkMessageRecordRequest(MessageRecord messageRecord, Long messageId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    logger.trace(\\\"MessageRecord operation started\\\");\\n    double averageAmount = amount / Math.max(quantity, 1);\\n}",
-              v2: "public void checkMessageRecordRequest(MessageRecord messageRecord, Long messageId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    logger.trace(\\\"MessageRecord operation started\\\");\\n    double averageAmount = amount / Math.max(quantity, 1);\\n    if (messageId == null) {\\n        throw new IllegalArgumentException(\\\"identifier is required\\\");\\n    }\\n}"
-            },
-            "mismatch": {
-              v1: "public double calculateFee(double baseAmount, int durationDays) {\\n    return baseAmount * 0.05 * durationDays;\\n}",
-              v2: "public double calculateFee(double baseAmount, String durationTier) {\\n    return baseAmount * 0.08;\\n}"
-            }
-          };
 
-          function loadPreset() {
-            const key = document.getElementById('presetSelect').value;
-            if (PRESETS[key]) {
-              document.getElementById('oldMethodInput').value = PRESETS[key].v1;
-              document.getElementById('newMethodInput').value = PRESETS[key].v2;
-            }
-          }
 
           function captureBaseline() {
             vscode.postMessage({ command: 'captureBaselineFromEditor' });
@@ -1113,8 +1079,7 @@ export class BehaviouralPanel {
             }
           });
 
-          // Initialize with preset 001 and check health
-          loadPreset();
+          // Check service health on load
           checkHealth();
         </script>
       </body>
