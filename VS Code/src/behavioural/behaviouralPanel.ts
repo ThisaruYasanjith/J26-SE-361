@@ -343,9 +343,61 @@ export class BehaviouralPanel {
             border: 1px solid var(--vscode-panel-border);
             font-weight: 600;
           }
-          .chip-added { background-color: #1e3a2f; color: #4ade80; border-color: #2e6047; }
-          .chip-removed { background-color: #3d1f24; color: #f87171; border-color: #652b32; }
-          .chip-retained { background-color: #1e293b; color: #94a3b8; border-color: #334155; }
+          .grid-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 12px;
+          }
+          @media (max-width: 600px) {
+            .grid-3 { grid-template-columns: 1fr; }
+            .grid-2 { grid-template-columns: 1fr; }
+          }
+          .cat-badge {
+            display: inline-block;
+            background-color: #2b3a4a;
+            color: #61dafb;
+            padding: 3px 8px;
+            border-radius: 4px;
+            margin-right: 6px;
+            margin-bottom: 4px;
+            font-family: var(--vscode-editor-font-family, monospace);
+            font-size: 11px;
+            font-weight: 600;
+            border: 1px solid #3d5166;
+          }
+          .cat-added {
+            background-color: #1e3a2f;
+            color: #4ade80;
+            border-color: #2e6047;
+          }
+          .cat-removed {
+            background-color: #3d1f24;
+            color: #f87171;
+            border-color: #652b32;
+          }
+          .cat-retained {
+            background-color: #1e293b;
+            color: #94a3b8;
+            border-color: #334155;
+          }
+          .method-body-expander {
+            margin-top: 8px;
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 3px;
+            background: rgba(0, 0, 0, 0.15);
+          }
+          .method-body-expander summary {
+            padding: 6px 10px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            color: var(--vscode-descriptionForeground);
+            user-select: none;
+          }
+          .method-body-expander summary:hover {
+            color: var(--vscode-foreground);
+          }
 
           .spinner {
             display: inline-block;
@@ -459,42 +511,47 @@ export class BehaviouralPanel {
           </div>
         </div>
 
-        <!-- Live CodeT5 Output Section -->
+        <!-- Stage 3: Fine-Tuned CodeT5 Behavioral Categories & Extracted Bodies -->
         <div id="resultsSection" style="display: none;">
           <div class="section-title">
             <i class="codicon codicon-symbol-class"></i>
-            Fine-Tuned CodeT5 Behavioral Categories
+            3. Fine-Tuned CodeT5 Behavioral Categories & Extracted Bodies
           </div>
 
           <div class="grid-2">
             <div class="issue-card">
-              <strong>Baseline Categories (v1)</strong>
+              <div style="font-weight: 600; font-size: 12px; margin-bottom: 6px;">🏷️ Baseline Categories (v1)</div>
               <div id="oldCategories" class="chip-container"></div>
-              <div class="code-box" id="oldBodyBox"></div>
+              <details class="method-body-expander" open>
+                <summary>Extracted Baseline Method Body</summary>
+                <div class="code-box" id="oldBodyBox">/* empty body */</div>
+              </details>
             </div>
             <div class="issue-card">
-              <strong>Modified Categories (v2)</strong>
+              <div style="font-weight: 600; font-size: 12px; margin-bottom: 6px;">🏷️ Modified Categories (v2)</div>
               <div id="newCategories" class="chip-container"></div>
-              <div class="code-box" id="newBodyBox"></div>
+              <details class="method-body-expander" open>
+                <summary>Extracted Modified Method Body</summary>
+                <div class="code-box" id="newBodyBox">/* empty body */</div>
+              </details>
             </div>
           </div>
 
-          <div class="section-title">
-            <i class="codicon codicon-git-compare"></i>
-            Behavioral Drift Deltas
-          </div>
-          <div class="issue-card">
-            <div style="margin-bottom: 8px;">
-              <strong>Added Categories:</strong>
-              <div id="addedChips" class="chip-container"></div>
-            </div>
-            <div style="margin-bottom: 8px;">
-              <strong>Removed Categories:</strong>
-              <div id="removedChips" class="chip-container"></div>
-            </div>
-            <div>
-              <strong>Retained Categories:</strong>
-              <div id="retainedChips" class="chip-container"></div>
+          <div class="issue-card" style="margin-top: 8px;">
+            <div style="font-weight: 600; font-size: 12px; margin-bottom: 8px;">📊 Behavioral Category Changes (v1 &rarr; v2)</div>
+            <div class="grid-3">
+              <div>
+                <strong id="addedHeader" style="font-size: 12px; color: #4ade80;">➕ Added in v2 (0):</strong>
+                <div id="addedChips" class="chip-container" style="margin-top: 4px;"></div>
+              </div>
+              <div>
+                <strong id="removedHeader" style="font-size: 12px; color: #f87171;">➖ Removed from v1 (0):</strong>
+                <div id="removedChips" class="chip-container" style="margin-top: 4px;"></div>
+              </div>
+              <div>
+                <strong id="retainedHeader" style="font-size: 12px; color: #94a3b8;">🔁 Retained in Both (0):</strong>
+                <div id="retainedChips" class="chip-container" style="margin-top: 4px;"></div>
+              </div>
             </div>
           </div>
 
@@ -592,12 +649,12 @@ export class BehaviouralPanel {
             const container = document.getElementById(containerId);
             container.innerHTML = '';
             if (!list || list.length === 0) {
-              container.innerHTML = '<span style="font-size:11px; opacity:0.6;">None</span>';
+              container.innerHTML = '<span style="font-size:11px; opacity:0.6; font-style:italic;">None detected</span>';
               return;
             }
             list.forEach(c => {
               const span = document.createElement('span');
-              span.className = 'cat-chip ' + (extraClass || '');
+              span.className = 'cat-badge ' + (extraClass || '');
               span.innerText = c;
               container.appendChild(span);
             });
@@ -685,17 +742,32 @@ export class BehaviouralPanel {
 
                 document.getElementById('resultsSection').style.display = 'block';
 
-                // Render categories
-                renderChips('oldCategories', data.old_method.categories, '');
-                renderChips('newCategories', data.new_method.categories, '');
-                document.getElementById('oldBodyBox').innerText = data.old_method.method_body;
-                document.getElementById('newBodyBox').innerText = data.new_method.method_body;
+                // Render Stage 3: Categories & Extracted Bodies
+                const s3 = data.stage3_categories || {
+                  old_method: data.old_method || { categories: [], method_body: '/* empty body */' },
+                  new_method: data.new_method || { categories: [], method_body: '/* empty body */' },
+                  added_categories: data.comparison?.added_categories || [],
+                  removed_categories: data.comparison?.removed_categories || [],
+                  retained_categories: data.comparison?.retained_categories || []
+                };
 
-                // Render comparison
-                const comp = data.comparison || {};
-                renderChips('addedChips', comp.added_categories, 'chip-added');
-                renderChips('removedChips', comp.removed_categories, 'chip-removed');
-                renderChips('retainedChips', comp.retained_categories, 'chip-retained');
+                renderChips('oldCategories', s3.old_method.categories, '');
+                renderChips('newCategories', s3.new_method.categories, '');
+                document.getElementById('oldBodyBox').innerText = s3.old_method.method_body || '/* empty body */';
+                document.getElementById('newBodyBox').innerText = s3.new_method.method_body || '/* empty body */';
+
+                // Render Category Changes
+                const addedCats = s3.added_categories || [];
+                const removedCats = s3.removed_categories || [];
+                const retainedCats = s3.retained_categories || [];
+
+                document.getElementById('addedHeader').innerText = '➕ Added in v2 (' + addedCats.length + '):';
+                document.getElementById('removedHeader').innerText = '➖ Removed from v1 (' + removedCats.length + '):';
+                document.getElementById('retainedHeader').innerText = '🔁 Retained in Both (' + retainedCats.length + '):';
+
+                renderChips('addedChips', addedCats, 'cat-added');
+                renderChips('removedChips', removedCats, 'cat-removed');
+                renderChips('retainedChips', retainedCats, 'cat-retained');
 
                 // Render dynamic alerts
                 const alertsDiv = document.getElementById('governanceAlerts');
