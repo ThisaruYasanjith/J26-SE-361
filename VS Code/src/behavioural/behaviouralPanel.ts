@@ -87,6 +87,12 @@ export class BehaviouralPanel {
           }
           break;
         }
+        case 'resetState': {
+          BehaviouralPanel.trackedDocUri = undefined;
+          BehaviouralPanel.trackedMethodName = undefined;
+          vscode.window.showInformationMessage('Behavioral Analysis panel reset.');
+          break;
+        }
       }
     });
   }
@@ -691,6 +697,13 @@ export class BehaviouralPanel {
           </ol>
         </div>
 
+        <!-- Reset Button at bottom of panel -->
+        <div style="margin-top: 24px; margin-bottom: 24px; text-align: center; border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); padding-top: 16px;">
+          <button id="resetBtn" class="secondary-btn" style="padding: 6px 18px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px;" onclick="resetPanel()" title="Reset inputs, captured methods, and analysis results">
+            <i class="codicon codicon-clear-all"></i> Reset
+          </button>
+        </div>
+
         <script>
           const vscode = acquireVsCodeApi();
 
@@ -718,6 +731,32 @@ export class BehaviouralPanel {
             if (statusText) statusText.innerText = 'Checking CodeT5...';
 
             vscode.postMessage({ command: 'checkHealth' });
+          }
+
+          function resetPanel() {
+            document.getElementById('oldMethodInput').value = '';
+            document.getElementById('newMethodInput').value = '';
+
+            document.getElementById('resultsSection').style.display = 'none';
+            document.getElementById('stage2Section').style.display = 'none';
+            document.getElementById('errorBox').style.display = 'none';
+            document.getElementById('autoCaptureBanner').style.display = 'none';
+
+            const btn = document.getElementById('runBtn');
+            if (btn) {
+              btn.disabled = false;
+              btn.innerHTML = '<i class="codicon codicon-play"></i> <span>Analyze Method</span>';
+            }
+
+            const guidanceCard = document.getElementById('initialGuidanceCard');
+            if (guidanceCard) {
+              guidanceCard.style.display = 'block';
+            }
+
+            const alertsDiv = document.getElementById('governanceAlerts');
+            if (alertsDiv) alertsDiv.innerHTML = '';
+
+            vscode.postMessage({ command: 'resetState' });
           }
 
           function runAnalysis() {
