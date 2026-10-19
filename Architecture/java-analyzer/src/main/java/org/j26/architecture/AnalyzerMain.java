@@ -1,6 +1,7 @@
 package org.j26.architecture;
 
 import org.j26.architecture.model.ComponentInfo;
+import org.j26.architecture.model.RelationshipInfo;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -50,6 +51,7 @@ public final class AnalyzerMain {
             output.println("Successfully parsed: " + result.successfullyParsed());
             output.println("Parse failures: " + result.parseFailures().size());
             output.println("Architecture entities extracted: " + result.extractedEntityCount());
+            output.println("Architecture relationships extracted: " + result.extractedRelationshipCount());
 
             for (ComponentInfo component : result.components()) {
                 String simpleName = component.name().substring(component.name().lastIndexOf('.') + 1);
@@ -57,6 +59,12 @@ public final class AnalyzerMain {
                 output.println("  package: " + (component.packageName().isEmpty()
                         ? "(default package)" : component.packageName()));
                 output.println("  file: " + component.filePath());
+            }
+
+            for (RelationshipInfo relationship : result.relationships()) {
+                String source = relationship.source().substring(relationship.source().lastIndexOf('.') + 1);
+                String target = relationship.target().substring(relationship.target().lastIndexOf('.') + 1);
+                output.println(source + " " + relationship.relationship() + " " + target);
             }
 
             // A partial scan still prints its summary, but scripts can detect the failures.
