@@ -1,5 +1,7 @@
 package org.j26.architecture;
 
+import org.j26.architecture.model.ComponentInfo;
+
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -47,6 +49,15 @@ public final class AnalyzerMain {
             output.println("Java files found: " + result.javaFiles().size());
             output.println("Successfully parsed: " + result.successfullyParsed());
             output.println("Parse failures: " + result.parseFailures().size());
+            output.println("Architecture entities extracted: " + result.extractedEntityCount());
+
+            for (ComponentInfo component : result.components()) {
+                String simpleName = component.name().substring(component.name().lastIndexOf('.') + 1);
+                output.println(component.springType() + " " + simpleName + " (" + component.entityType() + ")");
+                output.println("  package: " + (component.packageName().isEmpty()
+                        ? "(default package)" : component.packageName()));
+                output.println("  file: " + component.filePath());
+            }
 
             // A partial scan still prints its summary, but scripts can detect the failures.
             return result.parseFailures().isEmpty() ? 0 : 1;

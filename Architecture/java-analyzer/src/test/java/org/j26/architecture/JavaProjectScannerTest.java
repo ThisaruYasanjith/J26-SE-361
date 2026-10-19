@@ -84,6 +84,8 @@ class JavaProjectScannerTest {
         assertEquals(2, result.javaFiles().size());
         assertEquals(2, result.successfullyParsed());
         assertTrue(result.parseFailures().isEmpty());
+        assertEquals(1, result.extractedEntityCount());
+        assertEquals("demo.PaymentController", result.components().get(0).name());
     }
 
     @Test
@@ -98,6 +100,8 @@ class JavaProjectScannerTest {
         assertEquals(1, result.parseFailures().size());
         assertEquals(broken, result.parseFailures().get(0).filePath());
         assertFalse(result.parseFailures().get(0).message().isBlank());
+        assertEquals(1, result.extractedEntityCount());
+        assertEquals("ZValid", result.components().get(0).name());
     }
 
     @Test
@@ -107,6 +111,8 @@ class JavaProjectScannerTest {
         assertTrue(result.javaFiles().isEmpty());
         assertEquals(0, result.successfullyParsed());
         assertTrue(result.parseFailures().isEmpty());
+        assertTrue(result.components().isEmpty());
+        assertEquals(0, result.extractedEntityCount());
     }
 
     @Test
@@ -152,6 +158,10 @@ class JavaProjectScannerTest {
         assertTrue(text.contains("Java files found: 2"));
         assertTrue(text.contains("Successfully parsed: 1"));
         assertTrue(text.contains("Parse failures: 1"));
+        assertTrue(text.contains("Architecture entities extracted: 1"));
+        assertTrue(text.contains("NONE ZValid (CLASS)"));
+        assertTrue(text.contains("  package: (default package)"));
+        assertTrue(text.contains("  file: ZValid.java"));
         assertTrue(errors.toString(StandardCharsets.UTF_8).contains(broken.toString()));
         assertFalse(Files.exists(project.resolve("project_context.json")));
     }

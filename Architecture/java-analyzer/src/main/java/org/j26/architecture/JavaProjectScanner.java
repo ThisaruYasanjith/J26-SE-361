@@ -5,6 +5,7 @@ import com.github.javaparser.ParseResult;
 import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.Problem;
 import com.github.javaparser.ast.CompilationUnit;
+import org.j26.architecture.model.ComponentInfo;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -26,6 +27,7 @@ public final class JavaProjectScanner {
     private final JavaParser parser = new JavaParser(new ParserConfiguration()
             .setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17)
             .setCharacterEncoding(StandardCharsets.UTF_8));
+    private final ArchitectureEntityExtractor entityExtractor = new ArchitectureEntityExtractor();
 
     public List<Path> discoverJavaFiles(Path projectRoot) throws IOException {
         Path root = projectRoot.toAbsolutePath().normalize();
@@ -65,17 +67,20 @@ public final class JavaProjectScanner {
     public ScanResult scan(Path projectRoot) throws IOException {
         List<Path> javaFiles = discoverJavaFiles(projectRoot);
         List<ParseFailure> failures = new ArrayList<>();
+        List<ComponentInfo> components = new ArrayList<>();
 
         for (Path javaFile : javaFiles) {
             try {
                 ParseResult<CompilationUnit> result = parser.parse(javaFile);
-                // Extraction can use this compilation unit later; for now, only verify parsing.
                 if (!result.isSuccessful()) {
                     String message = result.getProblems().stream()
                             .map(Problem::getVerboseMessage)
                             .collect(Collectors.joining(System.lineSeparator()));
                     failures.add(new ParseFailure(javaFile, message.isBlank()
                             ? "JavaParser did not produce a compilation unit." : message));
+                } else {
+                    // Ignore partial ASTs from failed parses so they cannot produce misleading entities.
+                    components.addAll(entityExtractor.extract(result.getResult().orElseThrow(), projectRoot, javaFile));
                 }
             } catch (IOException exception) {
                 // A file can become unreadable after discovery. Keep scanning the other files.
@@ -83,20 +88,26 @@ public final class JavaProjectScanner {
             }
         }
 
-        return new ScanResult(javaFiles, failures);
+        return new ScanResult(javaFiles, failures, components);
     }
 
     public record ParseFailure(Path filePath, String message) {
     }
 
-    public record ScanResult(List<Path> javaFiles, List<ParseFailure> parseFailures) {
+    public record ScanResult(List<Path> javaFiles, List<ParseFailure> parseFailures,
+                             List<ComponentInfo> components) {
         public ScanResult {
             javaFiles = List.copyOf(javaFiles);
             parseFailures = List.copyOf(parseFailures);
+            components = List.copyOf(components);
         }
 
         public int successfullyParsed() {
             return javaFiles.size() - parseFailures.size();
+        }
+
+        public int extractedEntityCount() {
+            return components.size();
         }
     }
 }
