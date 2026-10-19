@@ -20,6 +20,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from transformers import AutoTokenizer, T5ForConditionalGeneration
 
+from src.method_parser import MethodParser
+from src.signature_checker import SignatureChecker
+from src.llm_analyzer import BehavioralFingerprint
+from src.drift_engine import BehavioralDriftEngine
+from src.impact_assessor import ImpactAssessor
+from src.explanation import ExplanationGenerator
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -537,6 +544,204 @@ def analyze(request: AnalyzeRequest):
         comparison=comparison,
         raw_output=raw_output,
     )
+
+
+@app.post("/analyze_pipeline", summary="Execute Complete 6-Stage Behavioral Drift Analysis Pipeline")
+def analyze_pipeline(request: AnalyzeRequest):
+    """
+    Executes the complete end-to-end behavioral governance pipeline:
+    - Stage 1: Java AST Method Parsing
+    - Stage 2: Same-Signature Verification
+    - Stage 3: Fine-Tuned CodeT5 Behavioral Categories & Body Extraction
+    - Stage 4: Multi-Dimensional Behavioral Drift Metrics
+    - Stage 5: Impact & Architectural Blast Radius Assessment
+    - Stage 6: Developer Guidance & JUnit Regression Test Generation
+    """
+    old_code = request.old_method.strip()
+    new_code = request.new_method.strip()
+
+    if not old_code or not new_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Both 'old_method' and 'new_method' must be non-empty strings."
+        )
+
+    # Stage 1: Parse methods
+    parser = MethodParser()
+    v1_parsed = parser.parse(old_code)
+    v2_parsed = parser.parse(new_code)
+
+    # Stage 2: Same-Signature Verification
+    checker = SignatureChecker()
+    sig_result = checker.check(v1_parsed, v2_parsed)
+
+    mismatches_data = [
+        {
+            "component": m.component,
+            "baseline_value": m.baseline_value,
+            "modified_value": m.modified_value,
+            "description": m.description,
+        }
+        for m in sig_result.mismatches
+    ]
+
+    stage2_data = {
+        "is_same_signature": sig_result.is_same_signature,
+        "signature_str": v1_parsed.signature_str,
+        "summary": sig_result.summary,
+        "mismatches": mismatches_data,
+    }
+
+    # If signature mismatch, return signature mismatch stage report immediately
+    if not sig_result.is_same_signature:
+        return {
+            "status": "signature_mismatch",
+            "stage2_signature": stage2_data,
+            "stage3_categories": None,
+            "stage4_drift": None,
+            "stage5_impact": None,
+            "stage6_guidance": None,
+        }
+
+    # Stage 3: CodeT5 inference for behavioral categories and extracted bodies
+    if not model_state.get("is_ready"):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Inference service is not ready. Model load error: {model_state.get('error', 'Unknown')}"
+        )
+
+    prompt = PROMPT_TEMPLATE.format(old_method=old_code, new_method=new_code)
+    tokenizer = model_state["tokenizer"]
+    model = model_state["model"]
+    device = model_state["device"]
+
+    try:
+        inputs = tokenizer(
+            prompt,
+            return_tensors="pt",
+            max_length=MAX_INPUT_LENGTH,
+            truncation=True,
+            padding=False,
+        ).to(device)
+
+        max_new_tokens = int(os.getenv("MAX_NEW_TOKENS", "384"))
+        num_beams = int(os.getenv("NUM_BEAMS", "4"))
+        with torch.inference_mode():
+            outputs = model.generate(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs.get("attention_mask"),
+                max_new_tokens=max_new_tokens,
+                num_beams=num_beams,
+                early_stopping=True,
+                do_sample=False,
+            )
+
+        raw_output = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    except Exception as e:
+        logger.error(f"Inference generation failure in pipeline: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Model inference failed: {str(e)}"
+        )
+
+    try:
+        validated = validate_and_parse_output(raw_output)
+    except ValueError as val_err:
+        logger.warning(f"Output validation failed in pipeline: {val_err}. Raw output: {raw_output}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": f"Model output failed validation: {str(val_err)}",
+                "raw_output": raw_output
+            }
+        )
+
+    comparison = compute_comparison(
+        validated["old_method"]["categories"],
+        validated["new_method"]["categories"]
+    )
+
+    stage3_data = {
+        "old_method": validated["old_method"],
+        "new_method": validated["new_method"],
+        "added_categories": comparison.added_categories,
+        "removed_categories": comparison.removed_categories,
+        "retained_categories": comparison.retained_categories,
+        "raw_output": raw_output,
+    }
+
+    # Stage 4: Behavioral Drift Engine
+    fp1 = BehavioralFingerprint(
+        method_name=v1_parsed.name,
+        categories=validated["old_method"]["categories"],
+        method_body=validated["old_method"]["method_body"],
+    )
+    fp2 = BehavioralFingerprint(
+        method_name=v2_parsed.name,
+        categories=validated["new_method"]["categories"],
+        method_body=validated["new_method"]["method_body"],
+    )
+
+    drift_engine = BehavioralDriftEngine()
+    drift_report = drift_engine.analyze(fp1, fp2)
+
+    dimension_deltas_data = [
+        {
+            "dimension": d.dimension,
+            "weight": d.weight,
+            "has_drift": d.has_drift,
+            "added_behaviors": d.added_behaviors,
+            "removed_behaviors": d.removed_behaviors,
+            "similarity_score": d.similarity_score,
+        }
+        for d in drift_report.dimension_deltas
+    ]
+
+    stage4_data = {
+        "drift_detected": drift_report.drift_detected,
+        "drift_score": drift_report.drift_score,
+        "drift_score_pct": round(drift_report.drift_score * 100, 1),
+        "severity": drift_report.severity.value,
+        "summary": drift_report.summary,
+        "flagged_drift_areas": drift_report.flagged_drift_areas,
+        "dimension_deltas": dimension_deltas_data,
+    }
+
+    # Stage 5: Impact & Architectural Blast Radius Assessment
+    assessor = ImpactAssessor()
+    vis_mod = " ".join(v1_parsed.modifiers)
+    impact = assessor.assess(sig_result, drift_report, visibility_modifier=vis_mod)
+
+    stage5_data = {
+        "risk_level": impact.risk_level.value,
+        "blast_radius": impact.blast_radius.value,
+        "backward_compatibility_intact": impact.backward_compatibility_intact,
+        "executive_summary": impact.executive_summary,
+        "silent_regression_risk": impact.silent_regression_risk,
+        "architectural_risks": impact.architectural_risks,
+        "recommended_mitigations": impact.recommended_mitigations,
+    }
+
+    # Stage 6: Developer Guidance & JUnit Regression Test Generation
+    explainer = ExplanationGenerator()
+    explanation = explainer.generate_explanation(v1_parsed, v2_parsed, sig_result, drift_report, impact)
+
+    stage6_data = {
+        "overview": explanation.overview,
+        "detailed_drift_breakdown": explanation.detailed_drift_breakdown,
+        "failure_scenarios": explanation.failure_scenarios,
+        "recommended_unit_tests": explanation.recommended_unit_tests,
+        "developer_guidance": explanation.developer_guidance,
+    }
+
+    return {
+        "status": "success",
+        "stage2_signature": stage2_data,
+        "stage3_categories": stage3_data,
+        "stage4_drift": stage4_data,
+        "stage5_impact": stage5_data,
+        "stage6_guidance": stage6_data,
+    }
 
 
 if __name__ == "__main__":
