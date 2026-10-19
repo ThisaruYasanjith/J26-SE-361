@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Architecture violation",
+  "description": "A rule violation with enough source information to display and explain the finding.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "violation_id",
+    "rule_id",
+    "severity",
+    "message",
+    "source",
+    "file_path",
+    "start_line",
+    "end_line",
+    "explanation",
+    "suggested_correction"
+  ],
+  "properties": {
+    "violation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rule_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable ID of the stored rule that was violated."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["INFO", "WARNING", "ERROR"]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short summary suitable for a findings list."
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Source component name from the project context."
+    },
+    "target": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "description": "Target component name when the finding concerns another component. Omit or use null otherwise."
+    },
+    "relationship": {
+      "enum": [null, "DEPENDS_ON", "CALLS", "IMPORTS", "EXTENDS", "IMPLEMENTS", "CONTAINS", "LOCATED_IN"],
+      "description": "Relationship involved in the finding, when applicable."
+    },
+    "file_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path relative to the analyzed project root, using forward slashes."
+    },
+    "start_line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "First source line, using one-based numbering."
+    },
+    "end_line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Last source line, inclusive. The producer must keep this at or after start_line."
+    },
+    "explanation": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Why the source evidence violates the rule."
+    },
+    "suggested_correction": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A suggested change that would satisfy the rule."
+    }
+  }
+}

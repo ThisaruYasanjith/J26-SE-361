@@ -1,0 +1,114 @@
+[
+  {
+    "rule_id": "LAYER_CONTROLLER_SERVICE_ALLOW",
+    "status": "VALID",
+    "rule": {
+      "rule_type": "LAYER_DEPENDENCY",
+      "source": { "entity_type": "LAYER", "name": "CONTROLLER" },
+      "relationship": "DEPENDS_ON",
+      "target": { "entity_type": "LAYER", "name": "SERVICE" },
+      "action": "ALLOW",
+      "scope": { "type": "PROJECT", "value": null },
+      "is_exception": false
+    },
+    "reason_code": null
+  },
+  {
+    "rule_id": "LAYER_SERVICE_REPOSITORY_ALLOW",
+    "status": "VALID",
+    "rule": {
+      "rule_type": "LAYER_DEPENDENCY",
+      "source": { "entity_type": "LAYER", "name": "SERVICE" },
+      "relationship": "DEPENDS_ON",
+      "target": { "entity_type": "LAYER", "name": "REPOSITORY" },
+      "action": "ALLOW",
+      "scope": { "type": "PROJECT", "value": null },
+      "is_exception": false
+    },
+    "reason_code": null
+  },
+  {
+    "rule_id": "LAYER_CONTROLLER_REPOSITORY_DENY",
+    "status": "VALID",
+    "rule": {
+      "rule_type": "LAYER_DEPENDENCY",
+      "source": { "entity_type": "LAYER", "name": "CONTROLLER" },
+      "relationship": "DEPENDS_ON",
+      "target": { "entity_type": "LAYER", "name": "REPOSITORY" },
+      "action": "DENY",
+      "scope": { "type": "PROJECT", "value": null },
+      "is_exception": false
+    },
+    "reason_code": null
+  },
+  {
+    "rule_id": "LAYER_REPOSITORY_SERVICE_DENY",
+    "status": "VALID",
+    "rule": {
+      "rule_type": "LAYER_DEPENDENCY",
+      "source": { "entity_type": "LAYER", "name": "REPOSITORY" },
+      "relationship": "DEPENDS_ON",
+      "target": { "entity_type": "LAYER", "name": "SERVICE" },
+      "action": "DENY",
+      "scope": { "type": "PROJECT", "value": null },
+      "is_exception": false
+    },
+    "reason_code": null
+  },
+  {
+    "rule_id": "LAYER_REPOSITORY_CONTROLLER_DENY",
+    "status": "VALID",
+    "rule": {
+      "rule_type": "LAYER_DEPENDENCY",
+      "source": { "entity_type": "LAYER", "name": "REPOSITORY" },
+      "relationship": "DEPENDS_ON",
+      "target": { "entity_type": "LAYER", "name": "CONTROLLER" },
+      "action": "DENY",
+      "scope": { "type": "PROJECT", "value": null },
+      "is_exception": false
+    },
+    "reason_code": null
+  },
+  {
+    "rule_id": "PACKAGE_CONTROLLER_REQUIRE",
+    "status": "VALID",
+    "rule": {
+      "rule_type": "PACKAGE_PLACEMENT",
+      "source": { "entity_type": "LAYER", "name": "CONTROLLER" },
+      "relationship": "LOCATED_IN",
+      "target": { "entity_type": "PACKAGE", "name": "controller" },
+      "action": "REQUIRE",
+      "scope": { "type": "PROJECT", "value": null },
+      "is_exception": false
+    },
+    "reason_code": null
+  },
+  {
+    "rule_id": "PACKAGE_SERVICE_REQUIRE",
+    "status": "VALID",
+    "rule": {
+      "rule_type": "PACKAGE_PLACEMENT",
+      "source": { "entity_type": "LAYER", "name": "SERVICE" },
+      "relationship": "LOCATED_IN",
+      "target": { "entity_type": "PACKAGE", "name": "service" },
+      "action": "REQUIRE",
+      "scope": { "type": "PROJECT", "value": null },
+      "is_exception": false
+    },
+    "reason_code": null
+  },
+  {
+    "rule_id": "PACKAGE_REPOSITORY_REQUIRE",
+    "status": "VALID",
+    "rule": {
+      "rule_type": "PACKAGE_PLACEMENT",
+      "source": { "entity_type": "LAYER", "name": "REPOSITORY" },
+      "relationship": "LOCATED_IN",
+      "target": { "entity_type": "PACKAGE", "name": "repository" },
+      "action": "REQUIRE",
+      "scope": { "type": "PROJECT", "value": null },
+      "is_exception": false
+    },
+    "reason_code": null
+  }
+]

@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Spring Boot project architecture context",
+  "description": "Shared project structure for architecture analysis. Names connect components to their relationships.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project_name",
+    "project_root",
+    "components",
+    "relationships"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "description": "Version of this project-context contract."
+    },
+    "project_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "project_root": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute path to the Spring Boot project being analyzed."
+    },
+    "components": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/component" }
+    },
+    "relationships": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/relationship" }
+    }
+  },
+  "definitions": {
+    "source_location": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Inclusive, one-based source lines. The producer must keep end_line at or after start_line.",
+      "required": ["start_line", "end_line"],
+      "properties": {
+        "start_line": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "entity_type",
+        "spring_type",
+        "package",
+        "file_path",
+        "annotations",
+        "source_location"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Project-unique component name. Use a fully qualified Java name to distinguish classes with the same simple name."
+        },
+        "entity_type": {
+          "type": "string",
+          "enum": ["CLASS", "INTERFACE", "COMPONENT"]
+        },
+        "spring_type": {
+          "type": "string",
+          "enum": ["CONTROLLER", "SERVICE", "REPOSITORY", "COMPONENT", "CONFIGURATION", "NONE"]
+        },
+        "package": {
+          "type": "string",
+          "description": "Java package name, or an empty string for the default package."
+        },
+        "file_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path relative to project_root, using forward slashes."
+        },
+        "annotations": {
+          "type": "array",
+          "description": "Annotation names without the @ prefix; use qualified names when available.",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "source_location": { "$ref": "#/definitions/source_location" }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "target", "relationship"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the source component in components."
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the target component in components."
+        },
+        "relationship": {
+          "type": "string",
+          "enum": ["DEPENDS_ON", "CALLS", "IMPORTS", "EXTENDS", "IMPLEMENTS", "CONTAINS"]
+        },
+        "source_location": {
+          "$ref": "#/definitions/source_location",
+          "description": "Optional location in the source component's file. Omit it when the relationship has no specific source span."
+        }
+      }
+    }
+  }
+}

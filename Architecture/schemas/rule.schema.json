@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Architecture rule",
+  "description": "A normalized rule or an explanation of why the input could not be normalized.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "rule", "reason_code"],
+  "properties": {
+    "rule_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable ID for a stored rule. Optional so an input can be normalized before it is saved."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["VALID", "AMBIGUOUS", "UNSUPPORTED"]
+    },
+    "rule": {
+      "anyOf": [
+        { "$ref": "#/definitions/rule" },
+        { "type": "null" }
+      ]
+    },
+    "reason_code": {
+      "enum": [
+        null,
+        "MISSING_SOURCE",
+        "MISSING_TARGET",
+        "UNCLEAR_RELATIONSHIP",
+        "UNCLEAR_SCOPE",
+        "INSUFFICIENT_RULE_INFORMATION",
+        "MULTIPLE_INTERPRETATIONS",
+        "NOT_ARCHITECTURAL_CONSTRAINT",
+        "UNSUPPORTED_RELATIONSHIP"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "description": "A valid result needs a complete rule. Other results need a reason and may leave the rule null.",
+      "if": {
+        "properties": { "status": { "const": "VALID" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "rule": { "$ref": "#/definitions/rule" },
+          "reason_code": { "type": "null" }
+        }
+      },
+      "else": {
+        "properties": {
+          "reason_code": { "type": "string" }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_type", "name"],
+      "properties": {
+        "entity_type": {
+          "type": "string",
+          "enum": ["LAYER", "PACKAGE", "CLASS", "INTERFACE", "COMPONENT"]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "LAYER names use Spring type labels such as CONTROLLER. A simple PACKAGE name such as controller matches a complete dot-separated package segment."
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_type", "source", "relationship", "target", "action", "scope", "is_exception"],
+      "properties": {
+        "rule_type": {
+          "type": "string",
+          "enum": ["LAYER_DEPENDENCY", "COMPONENT_ACCESS", "PACKAGE_PLACEMENT", "EXCEPTION"]
+        },
+        "source": { "$ref": "#/definitions/entity" },
+        "relationship": {
+          "type": "string",
+          "enum": ["DEPENDS_ON", "CALLS", "IMPORTS", "EXTENDS", "IMPLEMENTS", "LOCATED_IN"]
+        },
+        "target": { "$ref": "#/definitions/entity" },
+        "action": {
+          "type": "string",
+          "enum": ["ALLOW", "DENY", "ONLY", "REQUIRE"]
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Rules in this first contract apply to the whole analyzed project.",
+          "required": ["type", "value"],
+          "properties": {
+            "type": { "const": "PROJECT" },
+            "value": { "type": "null" }
+          }
+        },
+        "is_exception": {
+          "type": "boolean",
+          "description": "Marks a rule intended to describe an exception to another architecture constraint."
+        }
+      }
+    }
+  }
+}
