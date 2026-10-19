@@ -1,17 +1,18 @@
 """
-Dual-stream model for Java exception-handling defect detection
+Dual-stream model for Java exception-handling defect classification
 with category holdout evaluation.
 
 Semantic stream: GraphCodeBERT -> 768-dim
 Structural stream: AST embedding + transformer -> 128-dim
-Fusion: concatenate -> MLP classifier -> 2 classes
+Fusion: concatenate -> MLP classifier -> 15 classes
+        (clean + 14 defect categories)
 
 Category holdout: some categories are excluded from training but
 retained in validation and test. This tests generalization to
 defect types the model has never seen.
 
 Trains on data/processed/preprocessed.json and saves the best model
-to models/best_model.pt.
+to models/best_model_multiclass.pt.
 
 Works on CPU, CUDA (Colab), or Apple Silicon MPS.
 
@@ -26,6 +27,7 @@ os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
 os.environ["SAFETENSORS_FAST_GPU"] = "1"
 os.environ["HF_HUB_DISABLE_SAFETENSORS_CONVERSION"] = "1"
 
+import csv
 import json
 import random
 import sys
@@ -35,7 +37,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import f1_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModel
 
@@ -47,8 +49,9 @@ from transformers import AutoModel
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PREPROCESSED_PATH = PROJECT_ROOT / "data" / "processed" / "preprocessed.json"
 AST_VOCAB_PATH = PROJECT_ROOT / "data" / "processed" / "ast_vocab.json"
-CHECKPOINT_PATH = PROJECT_ROOT / "models" / "best_model.pt"
-HISTORY_PATH = PROJECT_ROOT / "results" / "training_history.csv"
+CATEGORY_MAP_PATH = PROJECT_ROOT / "data" / "processed" / "category_map.json"
+CHECKPOINT_PATH = PROJECT_ROOT / "models" / "best_model_multiclass.pt"
+HISTORY_PATH = PROJECT_ROOT / "results" / "training_history_multiclass.csv"
 
 GCBERT_MODEL_NAME = "microsoft/graphcodebert-base"
 
@@ -71,7 +74,7 @@ AST_NUM_LAYERS = 2
 AST_NUM_HEADS = 4
 AST_FF_DIM = 512
 FUSION_HIDDEN = 256
-NUM_CLASSES = 2
+NUM_CATEGORIES = 15   # clean + 14 defect categories
 
 # Training hyperparameters
 BATCH_SIZE = 16
@@ -127,7 +130,8 @@ class ExceptionDataset(Dataset):
             "input_ids": torch.tensor(r["input_ids"], dtype=torch.long),
             "attention_mask": torch.tensor(r["attention_mask"], dtype=torch.long),
             "ast_ids": torch.tensor(r["ast_ids"], dtype=torch.long),
-            "label": torch.tensor(r["label"], dtype=torch.long),
+            # Multi-class target: 0-14 instead of binary 0/1
+            "label": torch.tensor(r["category_id"], dtype=torch.long),
         }
 
 
@@ -177,7 +181,7 @@ class DualStreamModel(nn.Module):
             nn.Linear(fusion_input_dim, FUSION_HIDDEN),
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(FUSION_HIDDEN, NUM_CLASSES),
+            nn.Linear(FUSION_HIDDEN, NUM_CATEGORIES),   # 15 classes
         )
 
     def forward(self, input_ids, attention_mask, ast_ids):
@@ -216,6 +220,11 @@ def load_ast_vocab_size() -> int:
     return len(vocab)
 
 
+def load_category_map() -> dict:
+    with CATEGORY_MAP_PATH.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
 def split_by_field(records: list[dict]):
     train = [r for r in records if r["split"] == "train"]
     val = [r for r in records if r["split"] == "val"]
@@ -251,9 +260,9 @@ def compute_metrics(logits: torch.Tensor, labels: torch.Tensor) -> dict:
     preds = logits.argmax(dim=-1).cpu().numpy()
     labels_np = labels.cpu().numpy()
     return {
-        "precision": precision_score(labels_np, preds, zero_division=0),
-        "recall": recall_score(labels_np, preds, zero_division=0),
-        "f1": f1_score(labels_np, preds, zero_division=0),
+        "accuracy": accuracy_score(labels_np, preds),
+        "macro_f1": f1_score(labels_np, preds, average="macro", zero_division=0),
+        "weighted_f1": f1_score(labels_np, preds, average="weighted", zero_division=0),
     }
 
 
@@ -359,7 +368,9 @@ def main() -> int:
     print(f"Loading preprocessed data from {PREPROCESSED_PATH.name}...")
     records = load_preprocessed()
     ast_vocab_size = load_ast_vocab_size()
-    print(f"  {len(records)} records, AST vocab size: {ast_vocab_size}\n")
+    category_map = load_category_map()
+    print(f"  {len(records)} records, AST vocab size: {ast_vocab_size}")
+    print(f"  Categories: {len(category_map)}\n")
 
     train_all, val_all, test_records = split_by_field(records)
     train_seen, val_seen, val_heldout = apply_holdout(train_all, val_all)
@@ -400,7 +411,8 @@ def main() -> int:
     print("Building model...")
     model = DualStreamModel(ast_vocab_size=ast_vocab_size).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"  Trainable parameters: {n_params:,}\n")
+    print(f"  Trainable parameters: {n_params:,}")
+    print(f"  Output classes:       {NUM_CATEGORIES}\n")
 
     # ---- Optimizer + scheduler ----
     optimizer = build_optimizer(model)
@@ -428,41 +440,45 @@ def main() -> int:
         elapsed = time.time() - t0
 
         print(f"Epoch {epoch}/{EPOCHS}  ({elapsed:.1f}s)")
-        print(f"  train            loss={train_loss:.4f}  f1={train_metrics['f1']:.4f}")
-        print(f"  val (seen)       loss={seen_loss:.4f}  f1={seen_metrics['f1']:.4f}  "
-              f"prec={seen_metrics['precision']:.4f}  rec={seen_metrics['recall']:.4f}")
-        print(f"  val (held-out)   loss={heldout_loss:.4f}  f1={heldout_metrics['f1']:.4f}  "
-              f"prec={heldout_metrics['precision']:.4f}  rec={heldout_metrics['recall']:.4f}")
+        print(f"  train            loss={train_loss:.4f}  acc={train_metrics['accuracy']:.4f}  "
+              f"macroF1={train_metrics['macro_f1']:.4f}")
+        print(f"  val (seen)       loss={seen_loss:.4f}  acc={seen_metrics['accuracy']:.4f}  "
+              f"macroF1={seen_metrics['macro_f1']:.4f}")
+        print(f"  val (held-out)   loss={heldout_loss:.4f}  acc={heldout_metrics['accuracy']:.4f}  "
+              f"macroF1={heldout_metrics['macro_f1']:.4f}")
 
         history.append({
             "epoch": epoch,
             "train_loss": train_loss,
-            "train_f1": train_metrics["f1"],
+            "train_acc": train_metrics["accuracy"],
+            "train_macro_f1": train_metrics["macro_f1"],
             "val_seen_loss": seen_loss,
-            "val_seen_f1": seen_metrics["f1"],
-            "val_seen_precision": seen_metrics["precision"],
-            "val_seen_recall": seen_metrics["recall"],
+            "val_seen_acc": seen_metrics["accuracy"],
+            "val_seen_macro_f1": seen_metrics["macro_f1"],
+            "val_seen_weighted_f1": seen_metrics["weighted_f1"],
             "val_heldout_loss": heldout_loss,
-            "val_heldout_f1": heldout_metrics["f1"],
-            "val_heldout_precision": heldout_metrics["precision"],
-            "val_heldout_recall": heldout_metrics["recall"],
+            "val_heldout_acc": heldout_metrics["accuracy"],
+            "val_heldout_macro_f1": heldout_metrics["macro_f1"],
+            "val_heldout_weighted_f1": heldout_metrics["weighted_f1"],
         })
 
-        # Save best model based on HELD-OUT F1
-        if heldout_metrics["f1"] > best_heldout_f1:
-            best_heldout_f1 = heldout_metrics["f1"]
-            best_seen_f1_at_best = seen_metrics["f1"]
+        # Save best model based on HELD-OUT macro F1
+        if heldout_metrics["macro_f1"] > best_heldout_f1:
+            best_heldout_f1 = heldout_metrics["macro_f1"]
+            best_seen_f1_at_best = seen_metrics["macro_f1"]
             patience_counter = 0
             CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
             torch.save({
                 "model_state_dict": model.state_dict(),
                 "epoch": epoch,
-                "val_heldout_f1": heldout_metrics["f1"],
-                "val_seen_f1": seen_metrics["f1"],
+                "val_heldout_macro_f1": heldout_metrics["macro_f1"],
+                "val_seen_macro_f1": seen_metrics["macro_f1"],
                 "ast_vocab_size": ast_vocab_size,
+                "num_categories": NUM_CATEGORIES,
                 "holdout_categories": HOLDOUT_CATEGORIES,
+                "category_map": category_map,
             }, CHECKPOINT_PATH)
-            print(f"  -> saved best model (held-out f1={best_heldout_f1:.4f})")
+            print(f"  -> saved best model (held-out macro F1={best_heldout_f1:.4f})")
         else:
             patience_counter += 1
             print(f"  -> no improvement ({patience_counter}/{EARLY_STOP_PATIENCE})")
@@ -473,7 +489,6 @@ def main() -> int:
 
     # ---- Save training history ----
     HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    import csv
     with HISTORY_PATH.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=history[0].keys())
         writer.writeheader()
@@ -485,9 +500,9 @@ def main() -> int:
     print("=" * 60)
     print("FINAL RESULTS")
     print("=" * 60)
-    print(f"Best held-out validation F1:  {best_heldout_f1:.4f}")
-    print(f"Seen-category validation F1:  {best_seen_f1_at_best:.4f}")
-    print(f"Generalization gap:           {best_seen_f1_at_best - best_heldout_f1:.4f}")
+    print(f"Best held-out validation macro F1:  {best_heldout_f1:.4f}")
+    print(f"Seen-category validation macro F1:  {best_seen_f1_at_best:.4f}")
+    print(f"Generalization gap:                 {best_seen_f1_at_best - best_heldout_f1:.4f}")
     print()
     print(f"Interpretation:")
     gap = best_seen_f1_at_best - best_heldout_f1
