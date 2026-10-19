@@ -343,6 +343,30 @@ export class BehaviouralPanel {
             border: 1px solid var(--vscode-panel-border);
             font-weight: 600;
           }
+          .stat-card {
+            background: var(--vscode-editorWidget-background);
+            border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+            border-left: 4px solid #38bdf8;
+            border-radius: 4px;
+            padding: 10px 12px;
+          }
+          .stat-card-title {
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+          }
+          .stat-card-val {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--vscode-editor-foreground);
+          }
+          .badge-critical { color: #fff; background-color: #d9534f; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+          .badge-high { color: #fff; background-color: #f0ad4e; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+          .badge-medium { color: #fff; background-color: #0275d8; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+          .badge-low { color: #fff; background-color: #5cb85c; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+          .badge-none { color: #fff; background-color: #6c757d; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; }
           .grid-3 {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
@@ -553,6 +577,37 @@ export class BehaviouralPanel {
                 <div id="retainedChips" class="chip-container" style="margin-top: 4px;"></div>
               </div>
             </div>
+          </div>
+
+          <!-- Stage 4: Behavioral Drift Metrics -->
+          <div class="section-title">
+            <i class="codicon codicon-graph"></i>
+            4. Behavioral Drift Metrics
+          </div>
+          <div class="grid-3" style="margin-bottom: 12px;">
+            <div class="stat-card">
+              <div class="stat-card-title">Drift Score</div>
+              <div class="stat-card-val" id="driftScoreVal">0.0%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-title">Drift Severity</div>
+              <div class="stat-card-val"><span id="driftSeverityBadge" class="badge-none">NONE</span></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-title">Drift Detected</div>
+              <div class="stat-card-val" id="driftDetectedVal">NO</div>
+            </div>
+          </div>
+
+          <div class="issue-card" style="margin-bottom: 12px;">
+            <p style="margin: 0 0 6px 0; font-size: 12px;"><strong>Summary:</strong> <span id="driftSummaryText">No drift detected.</span></p>
+            <div id="affectedDimensionsRow" style="display: none; font-size: 12px; margin-top: 6px;">
+              <strong>Affected Behavioral Dimensions:</strong> <span id="affectedDimensionsText" style="color: #f0ad4e;"></span>
+            </div>
+            <details class="method-body-expander" style="margin-top: 10px;">
+              <summary>Detailed Dimension Deltas</summary>
+              <div id="dimensionDeltasList" style="padding: 8px 10px;"></div>
+            </details>
           </div>
 
           <div class="section-title">
@@ -768,6 +823,55 @@ export class BehaviouralPanel {
                 renderChips('addedChips', addedCats, 'cat-added');
                 renderChips('removedChips', removedCats, 'cat-removed');
                 renderChips('retainedChips', retainedCats, 'cat-retained');
+
+                // Render Stage 4: Behavioral Drift Metrics
+                const s4 = data.stage4_drift;
+                if (s4) {
+                  document.getElementById('driftScoreVal').innerText = s4.drift_score_pct !== undefined ? (s4.drift_score_pct + '%') : ((s4.drift_score * 100).toFixed(1) + '%');
+                  const sev = (s4.severity || 'NONE').toUpperCase();
+                  const sevBadge = document.getElementById('driftSeverityBadge');
+                  sevBadge.innerText = sev;
+                  sevBadge.className = sev === 'CRITICAL' ? 'badge-critical' :
+                                       sev === 'HIGH' ? 'badge-high' :
+                                       sev === 'MEDIUM' ? 'badge-medium' :
+                                       sev === 'LOW' ? 'badge-low' : 'badge-none';
+
+                  const detectedVal = document.getElementById('driftDetectedVal');
+                  detectedVal.innerText = s4.drift_detected ? 'YES' : 'NO';
+                  detectedVal.style.color = s4.drift_detected ? '#f87171' : '#4ade80';
+
+                  document.getElementById('driftSummaryText').innerText = s4.summary || 'No behavioral drift detected.';
+
+                  const affRow = document.getElementById('affectedDimensionsRow');
+                  const affText = document.getElementById('affectedDimensionsText');
+                  if (s4.flagged_drift_areas && s4.flagged_drift_areas.length > 0) {
+                    affRow.style.display = 'block';
+                    affText.innerText = s4.flagged_drift_areas.join(', ');
+                  } else {
+                    affRow.style.display = 'none';
+                  }
+
+                  const deltasList = document.getElementById('dimensionDeltasList');
+                  deltasList.innerHTML = '';
+                  (s4.dimension_deltas || []).forEach(d => {
+                    const icon = d.has_drift ? '⚠️' : '✔️';
+                    let detailHtml = '';
+                    if (d.has_drift) {
+                      if (d.added_behaviors && d.added_behaviors.length > 0) {
+                        detailHtml += '<div style="margin-left: 14px; font-size: 11px; color: #4ade80;">- Added in v2: <code>' + d.added_behaviors.join(', ') + '</code></div>';
+                      }
+                      if (d.removed_behaviors && d.removed_behaviors.length > 0) {
+                        detailHtml += '<div style="margin-left: 14px; font-size: 11px; color: #f87171;">- Removed from v1: <code>' + d.removed_behaviors.join(', ') + '</code></div>';
+                      }
+                    } else {
+                      detailHtml = '<div style="margin-left: 14px; font-size: 11px; opacity: 0.7;">No divergence detected in this dimension.</div>';
+                    }
+                    deltasList.innerHTML += \`<div style="margin-bottom: 6px;">
+                      <div style="font-size: 12px; font-weight: 600;">\${icon} \${(d.dimension || '').toUpperCase()} <span style="font-size: 11px; font-weight: normal; opacity: 0.7;">(weight: \${Number(d.weight || 0).toFixed(2)})</span></div>
+                      \${detailHtml}
+                    </div>\`;
+                  });
+                }
 
                 // Render dynamic alerts
                 const alertsDiv = document.getElementById('governanceAlerts');
