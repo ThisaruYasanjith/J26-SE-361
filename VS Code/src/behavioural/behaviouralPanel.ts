@@ -382,14 +382,37 @@ export class BehaviouralPanel {
           </select>
         </div>
 
+        <div id="autoCaptureBanner" class="issue-card" style="display:none; background-color: rgba(74, 222, 128, 0.12); border-color: #2e6047; margin-bottom: 12px;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <i class="codicon codicon-pass" style="color: #4ade80; font-size: 16px;"></i>
+              <strong style="color: #4ade80;">Auto-Captured Refactored Method!</strong>
+            </div>
+            <button class="secondary-btn" style="padding: 2px 6px; font-size: 10px;" onclick="document.getElementById('autoCaptureBanner').style.display='none'">Dismiss</button>
+          </div>
+          <p id="autoCaptureText" style="font-size: 12px; margin: 4px 0 0 0; color: var(--vscode-foreground);"></p>
+        </div>
+
         <div class="grid-2">
           <div>
-            <label for="oldMethodInput">Baseline Java Method (v1):</label>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label for="oldMethodInput" style="margin-bottom: 0;">Baseline Java Method (v1):</label>
+              <button class="secondary-btn" style="padding: 2px 8px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" onclick="captureBaseline()" title="Capture selected Java method from active VS Code editor">
+                <i class="codicon codicon-arrow-down"></i> Capture Selection
+              </button>
+            </div>
             <textarea id="oldMethodInput" rows="8"></textarea>
+            <div id="v1Meta" style="display: none; font-size: 11px; color: var(--vscode-editorInfo-foreground); margin-top: 4px;"></div>
           </div>
           <div>
-            <label for="newMethodInput">Modified Java Method (v2):</label>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label for="newMethodInput" style="margin-bottom: 0;">Modified Java Method (v2):</label>
+              <button class="secondary-btn" style="padding: 2px 8px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" onclick="captureModified()" title="Capture current Java method from active VS Code editor">
+                <i class="codicon codicon-arrow-down"></i> Capture Current
+              </button>
+            </div>
             <textarea id="newMethodInput" rows="8"></textarea>
+            <div id="v2Meta" style="display: none; font-size: 11px; color: var(--vscode-editorInfo-foreground); margin-top: 4px;"></div>
           </div>
         </div>
 
@@ -406,6 +429,34 @@ export class BehaviouralPanel {
         <div id="errorBox" class="issue-card" style="display: none; border-color: #d9534f; background-color: rgba(217, 83, 79, 0.1);">
           <strong style="color: #f87171;">Analysis Failed</strong>
           <p id="errorMsg" style="font-size: 12px; margin: 6px 0 0 0;"></p>
+        </div>
+
+        <!-- Section 2: Same-Signature Verification Results -->
+        <div id="stage2Section" style="display: none; margin-bottom: 16px;">
+          <div class="section-title">
+            <i class="codicon codicon-verified"></i>
+            2. Same-Signature Verification Results
+          </div>
+          <div id="sigVerifiedCard" class="issue-card" style="display: none; background-color: rgba(30, 58, 47, 0.35); border-color: #2e6047;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <i class="codicon codicon-check" style="color: #4ade80; font-size: 16px;"></i>
+              <strong style="color: #4ade80;">Same-Signature Verified!</strong>
+            </div>
+            <p style="margin: 6px 0 0 0; font-size: 12px; color: var(--vscode-foreground);">
+              Both methods share signature: <code id="sigVerifiedCode" style="color: #4ade80; font-family: monospace;"></code>
+            </p>
+          </div>
+          <div id="sigMismatchCard" class="issue-card" style="display: none; background-color: rgba(61, 31, 36, 0.45); border-color: #7f1d1d;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <i class="codicon codicon-error" style="color: #f87171; font-size: 16px;"></i>
+              <strong style="color: #f87171;">Signature Mismatch Detected!</strong>
+            </div>
+            <p id="sigMismatchSummary" style="margin: 6px 0; font-size: 12px; color: var(--vscode-foreground);"></p>
+            <div id="sigMismatchesList" style="margin: 8px 0;"></div>
+            <p style="margin: 8px 0 0 0; font-size: 11px; opacity: 0.8; color: var(--vscode-descriptionForeground);">
+              ℹ️ Behavioral Drift Detection applies to methods with identical signatures. This change constitutes an explicit API signature change.
+            </p>
+          </div>
         </div>
 
         <!-- Live CodeT5 Output Section -->
@@ -496,6 +547,14 @@ export class BehaviouralPanel {
             }
           }
 
+          function captureBaseline() {
+            vscode.postMessage({ command: 'captureBaselineFromEditor' });
+          }
+
+          function captureModified() {
+            vscode.postMessage({ command: 'captureModifiedFromEditor' });
+          }
+
           function checkHealth() {
             vscode.postMessage({ command: 'checkHealth' });
           }
@@ -560,6 +619,31 @@ export class BehaviouralPanel {
                 }
                 break;
               }
+              case 'updateBaselineMethod': {
+                document.getElementById('oldMethodInput').value = msg.methodCode || '';
+                const meta = document.getElementById('v1Meta');
+                meta.style.display = 'block';
+                meta.innerText = '📍 Captured from ' + (msg.fileName || 'editor') + ': ' + (msg.signature || msg.methodName);
+                break;
+              }
+              case 'updateModifiedMethod': {
+                document.getElementById('newMethodInput').value = msg.methodCode || '';
+                const meta = document.getElementById('v2Meta');
+                meta.style.display = 'block';
+                meta.innerText = '📍 Captured from ' + (msg.fileName || 'editor') + ': ' + (msg.signature || msg.methodName);
+                break;
+              }
+              case 'autoCapturedRefactoredMethod': {
+                document.getElementById('newMethodInput').value = msg.methodCode || '';
+                const meta = document.getElementById('v2Meta');
+                meta.style.display = 'block';
+                meta.innerText = '📍 Auto-Captured on Save: ' + (msg.signature || msg.methodName);
+                const banner = document.getElementById('autoCaptureBanner');
+                const bannerText = document.getElementById('autoCaptureText');
+                banner.style.display = 'block';
+                bannerText.innerText = 'Refactored method "' + msg.methodName + '" in ' + msg.fileName + ' detected on Save and populated into Modified (v2). Ready to analyze!';
+                break;
+              }
               case 'analysisResult': {
                 const btn = document.getElementById('runBtn');
                 btn.disabled = false;
@@ -572,6 +656,33 @@ export class BehaviouralPanel {
 
                 const data = msg.data;
                 document.getElementById('defaultCard').style.display = 'none';
+
+                // Render Stage 2: Same-Signature Verification
+                const sig = data.stage2_signature;
+                if (sig) {
+                  document.getElementById('stage2Section').style.display = 'block';
+                  if (sig.is_same_signature) {
+                    document.getElementById('sigVerifiedCard').style.display = 'block';
+                    document.getElementById('sigMismatchCard').style.display = 'none';
+                    document.getElementById('sigVerifiedCode').innerText = sig.signature_str || 'Identical signature verified';
+                  } else {
+                    document.getElementById('sigVerifiedCard').style.display = 'none';
+                    document.getElementById('sigMismatchCard').style.display = 'block';
+                    document.getElementById('sigMismatchSummary').innerText = sig.summary || 'Method signatures differ between baseline and modified versions.';
+                    const list = document.getElementById('sigMismatchesList');
+                    list.innerHTML = '';
+                    (sig.mismatches || []).forEach(m => {
+                      list.innerHTML += \`<div style="font-size:12px; margin-bottom:4px; padding:4px 8px; background:rgba(0,0,0,0.2); border-radius:3px;">
+                        <strong>\${m.component}:</strong> Baseline <code>\${m.baseline_value}</code> vs Modified <code>\${m.modified_value}</code> (\${m.description})
+                      </div>\`;
+                    });
+                    if (data.status === 'signature_mismatch') {
+                      document.getElementById('resultsSection').style.display = 'none';
+                      return;
+                    }
+                  }
+                }
+
                 document.getElementById('resultsSection').style.display = 'block';
 
                 // Render categories
