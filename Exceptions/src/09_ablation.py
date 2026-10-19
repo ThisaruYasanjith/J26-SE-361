@@ -1,18 +1,18 @@
 """
-Ablation study for the dual-stream model.
+Ablation study for the dual-stream model — 15-class output, no holdout.
 
-Trains and evaluates three configurations with the same category holdout:
+Trains and evaluates three configurations on ALL 15 categories:
   A. Semantic only  (GraphCodeBERT, no AST)
   B. Structural only (AST, no GraphCodeBERT)
   C. Combined        (both streams fused) — the proposed model
 
-Reports F1 on held-out categories for each configuration.
+Reports accuracy and macro F1 on the full test set for each configuration.
 
 Output:
   results/ablation.csv
-  models/ablation_semantic.pt
-  models/ablation_structural.pt
-  models/ablation_combined.pt
+  models/ablation_semantic_15class.pt
+  models/ablation_structural_15class.pt
+  models/ablation_combined_15class.pt
 
 Run from project root:
     python src/09_ablation.py
@@ -35,7 +35,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import f1_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModel
 
@@ -47,18 +47,12 @@ from transformers import AutoModel
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PREPROCESSED_PATH = PROJECT_ROOT / "data" / "processed" / "preprocessed.json"
 AST_VOCAB_PATH = PROJECT_ROOT / "data" / "processed" / "ast_vocab.json"
+CATEGORY_MAP_PATH = PROJECT_ROOT / "data" / "processed" / "category_map.json"
 RESULTS_DIR = PROJECT_ROOT / "results"
 MODELS_DIR = PROJECT_ROOT / "models"
 OUTPUT_PATH = RESULTS_DIR / "ablation.csv"
 
 GCBERT_MODEL_NAME = "microsoft/graphcodebert-base"
-
-HOLDOUT_CATEGORIES = [
-    "swallows_declared_exception",
-    "corrupted_state_on_exception",
-    "inconsistent_with_precheck",
-    "empty_catch",
-]
 
 # Model architecture
 SEMANTIC_DIM = 768
@@ -68,7 +62,7 @@ AST_NUM_LAYERS = 2
 AST_NUM_HEADS = 4
 AST_FF_DIM = 512
 FUSION_HIDDEN = 256
-NUM_CLASSES = 2
+NUM_CATEGORIES = 15   # clean + 14 defect categories
 
 # Training
 BATCH_SIZE = 16
@@ -117,7 +111,8 @@ class ExceptionDataset(Dataset):
             "input_ids": torch.tensor(r["input_ids"], dtype=torch.long),
             "attention_mask": torch.tensor(r["attention_mask"], dtype=torch.long),
             "ast_ids": torch.tensor(r["ast_ids"], dtype=torch.long),
-            "label": torch.tensor(r["label"], dtype=torch.long),
+            # Multi-class target: 0-14 instead of binary 0/1
+            "label": torch.tensor(r["category_id"], dtype=torch.long),
         }
 
 
@@ -144,7 +139,7 @@ class SemanticOnlyModel(nn.Module):
             nn.Linear(SEMANTIC_DIM, FUSION_HIDDEN),
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(FUSION_HIDDEN, NUM_CLASSES),
+            nn.Linear(FUSION_HIDDEN, NUM_CATEGORIES),   # 15 classes
         )
 
     def forward(self, input_ids, attention_mask, ast_ids=None):
@@ -182,7 +177,7 @@ class StructuralOnlyModel(nn.Module):
             nn.Linear(AST_HIDDEN_DIM, FUSION_HIDDEN),
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(FUSION_HIDDEN, NUM_CLASSES),
+            nn.Linear(FUSION_HIDDEN, NUM_CATEGORIES),   # 15 classes
         )
 
     def forward(self, input_ids=None, attention_mask=None, ast_ids=None):
@@ -226,7 +221,7 @@ class DualStreamModel(nn.Module):
             nn.Linear(fusion_input_dim, FUSION_HIDDEN),
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(FUSION_HIDDEN, NUM_CLASSES),
+            nn.Linear(FUSION_HIDDEN, NUM_CATEGORIES),   # 15 classes
         )
 
     def forward(self, input_ids, attention_mask, ast_ids):
@@ -263,6 +258,11 @@ def load_ast_vocab_size():
     return len(vocab)
 
 
+def load_category_map():
+    with CATEGORY_MAP_PATH.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
 # ============================================================
 # METRICS
 # ============================================================
@@ -271,9 +271,9 @@ def compute_metrics(logits, labels):
     preds = logits.argmax(dim=-1).cpu().numpy()
     labels_np = labels.cpu().numpy()
     return {
-        "precision": precision_score(labels_np, preds, zero_division=0),
-        "recall": recall_score(labels_np, preds, zero_division=0),
-        "f1": f1_score(labels_np, preds, zero_division=0),
+        "accuracy": accuracy_score(labels_np, preds),
+        "macro_f1": f1_score(labels_np, preds, average="macro", zero_division=0),
+        "weighted_f1": f1_score(labels_np, preds, average="weighted", zero_division=0),
     }
 
 
@@ -351,9 +351,10 @@ def run_configuration(
     model: nn.Module,
     train_loader,
     val_loader,
-    test_ood_loader,
+    test_loader,
     device,
     save_path: Path,
+    category_map: dict,
 ):
     print(f"\n{'='*60}")
     print(f"Training configuration: {name}")
@@ -371,34 +372,38 @@ def run_configuration(
         elapsed = time.time() - t0
 
         print(f"Epoch {epoch}/{EPOCHS}  ({elapsed:.1f}s)")
-        print(f"  train  loss={train_loss:.4f}  f1={train_metrics['f1']:.4f}")
-        print(f"  val    loss={val_loss:.4f}  f1={val_metrics['f1']:.4f}")
+        print(f"  train  loss={train_loss:.4f}  acc={train_metrics['accuracy']:.4f}  "
+              f"macroF1={train_metrics['macro_f1']:.4f}")
+        print(f"  val    loss={val_loss:.4f}  acc={val_metrics['accuracy']:.4f}  "
+              f"macroF1={val_metrics['macro_f1']:.4f}")
 
-        if val_metrics["f1"] > best_val_f1:
-            best_val_f1 = val_metrics["f1"]
+        if val_metrics["macro_f1"] > best_val_f1:
+            best_val_f1 = val_metrics["macro_f1"]
             torch.save({
                 "model_state_dict": model.state_dict(),
                 "epoch": epoch,
-                "val_f1": best_val_f1,
+                "val_macro_f1": best_val_f1,
+                "num_categories": NUM_CATEGORIES,
+                "category_map": category_map,
             }, save_path)
-            print(f"  -> saved best ({best_val_f1:.4f})")
+            print(f"  -> saved best (val macro F1={best_val_f1:.4f})")
         print()
 
-    # Load best and evaluate on held-out test
+    # Load best and evaluate on full test set
     checkpoint = torch.load(save_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
 
-    test_loss, test_metrics = evaluate(model, test_ood_loader, criterion, device)
-    print(f"\n{name} — Final held-out test performance:")
-    print(f"  Precision: {test_metrics['precision']:.4f}")
-    print(f"  Recall:    {test_metrics['recall']:.4f}")
-    print(f"  F1:        {test_metrics['f1']:.4f}\n")
+    test_loss, test_metrics = evaluate(model, test_loader, criterion, device)
+    print(f"\n{name} — Final test performance:")
+    print(f"  Accuracy:    {test_metrics['accuracy']:.4f}")
+    print(f"  Macro F1:    {test_metrics['macro_f1']:.4f}")
+    print(f"  Weighted F1: {test_metrics['weighted_f1']:.4f}\n")
 
     return {
         "config": name,
-        "precision": test_metrics["precision"],
-        "recall": test_metrics["recall"],
-        "f1": test_metrics["f1"],
+        "accuracy": test_metrics["accuracy"],
+        "macro_f1": test_metrics["macro_f1"],
+        "weighted_f1": test_metrics["weighted_f1"],
     }
 
 
@@ -417,29 +422,27 @@ def main() -> int:
     print("Loading data...")
     records = load_preprocessed()
     ast_vocab_size = load_ast_vocab_size()
+    category_map = load_category_map()
+    print(f"  {len(records)} records, AST vocab size: {ast_vocab_size}, "
+          f"categories: {len(category_map)}\n")
 
-    # Split
-    train_all = [r for r in records if r["split"] == "train"]
-    val_all = [r for r in records if r["split"] == "val"]
-    test_all = [r for r in records if r["split"] == "test"]
+    # Split — no holdout, use all records
+    train = [r for r in records if r["split"] == "train"]
+    val = [r for r in records if r["split"] == "val"]
+    test = [r for r in records if r["split"] == "test"]
 
-    # Apply category holdout
-    train = [r for r in train_all if r["defect_category"] not in HOLDOUT_CATEGORIES]
-    val = [r for r in val_all if r["defect_category"] not in HOLDOUT_CATEGORIES]
-    test_ood = [r for r in test_all if r["defect_category"] in HOLDOUT_CATEGORIES]
+    print(f"  train:  {len(train)}")
+    print(f"  val:    {len(val)}")
+    print(f"  test:   {len(test)}\n")
 
-    print(f"  train (seen categories):  {len(train)}")
-    print(f"  val (seen categories):    {len(val)}")
-    print(f"  test (held-out only):     {len(test_ood)}\n")
-
-    if not test_ood:
-        print("No held-out test records. Aborting.")
+    if not test:
+        print("No test records. Aborting.")
         return 1
 
     # Loaders
     train_loader = DataLoader(ExceptionDataset(train), batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(ExceptionDataset(val), batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
-    test_ood_loader = DataLoader(ExceptionDataset(test_ood), batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
+    test_loader = DataLoader(ExceptionDataset(test), batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
 
     # Run three configurations
     results = []
@@ -448,38 +451,42 @@ def main() -> int:
     results.append(run_configuration(
         "Semantic only",
         SemanticOnlyModel(),
-        train_loader, val_loader, test_ood_loader, device,
-        MODELS_DIR / "ablation_semantic.pt",
+        train_loader, val_loader, test_loader, device,
+        MODELS_DIR / "ablation_semantic_15class.pt",
+        category_map,
     ))
 
     # Config B: Structural only
     results.append(run_configuration(
         "Structural only",
         StructuralOnlyModel(ast_vocab_size=ast_vocab_size),
-        train_loader, val_loader, test_ood_loader, device,
-        MODELS_DIR / "ablation_structural.pt",
+        train_loader, val_loader, test_loader, device,
+        MODELS_DIR / "ablation_structural_15class.pt",
+        category_map,
     ))
 
     # Config C: Combined
     results.append(run_configuration(
         "Combined",
         DualStreamModel(ast_vocab_size=ast_vocab_size),
-        train_loader, val_loader, test_ood_loader, device,
-        MODELS_DIR / "ablation_combined.pt",
+        train_loader, val_loader, test_loader, device,
+        MODELS_DIR / "ablation_combined_15class.pt",
+        category_map,
     ))
 
     # Summary
-    print("\n" + "=" * 60)
-    print("ABLATION STUDY — Held-out Test F1")
-    print("=" * 60 + "\n")
-    print(f"{'Configuration':<25} {'Precision':>10} {'Recall':>10} {'F1':>10}")
-    print("-" * 60)
+    print("\n" + "=" * 70)
+    print("ABLATION STUDY — Full Test Set (15-class, no holdout)")
+    print("=" * 70 + "\n")
+    print(f"{'Configuration':<20} {'Accuracy':>10} {'Macro F1':>10} {'Weighted F1':>12}")
+    print("-" * 70)
     for r in results:
-        print(f"{r['config']:<25} {r['precision']:>10.4f} {r['recall']:>10.4f} {r['f1']:>10.4f}")
+        print(f"{r['config']:<20} {r['accuracy']:>10.4f} "
+              f"{r['macro_f1']:>10.4f} {r['weighted_f1']:>12.4f}")
 
     # Write CSV
     with OUTPUT_PATH.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["config", "precision", "recall", "f1"])
+        writer = csv.DictWriter(f, fieldnames=["config", "accuracy", "macro_f1", "weighted_f1"])
         writer.writeheader()
         writer.writerows(results)
 
