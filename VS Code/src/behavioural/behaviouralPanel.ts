@@ -484,7 +484,7 @@ export class BehaviouralPanel {
         <div class="btn-row">
           <button id="runBtn" class="primary-btn" onclick="runAnalysis()">
             <i class="codicon codicon-play"></i>
-            <span>Analyze with Fine-Tuned CodeT5</span>
+            <span>Analyze Method</span>
           </button>
           <button class="secondary-btn" onclick="checkHealth()">
             <i class="codicon codicon-refresh"></i> Refresh Status
@@ -679,7 +679,7 @@ export class BehaviouralPanel {
             <li>Open your Java file in the editor and select/highlight any Java method.</li>
             <li>Click <strong>Capture Selection</strong> to populate <em>Baseline Java Method (v1)</em>.</li>
             <li>Refactor the method directly in your editor and press <kbd>Ctrl+S</kbd> to save. The modified code will automatically populate into <em>Modified Java Method (v2)</em>!</li>
-            <li>Click <strong>Analyze with Fine-Tuned CodeT5</strong> to run the full 6-stage behavioral verification pipeline!</li>
+            <li>Click <strong>Analyze Method</strong> to run the full 6-stage behavioral verification pipeline!</li>
           </ol>
         </div>
 
@@ -726,7 +726,7 @@ export class BehaviouralPanel {
             document.getElementById('errorMsg').innerText = msg;
             const btn = document.getElementById('runBtn');
             btn.disabled = false;
-            btn.innerHTML = '<i class="codicon codicon-play"></i> <span>Analyze with Fine-Tuned CodeT5</span>';
+            btn.innerHTML = '<i class="codicon codicon-play"></i> <span>Analyze Method</span>';
           }
 
           function copyCode(btn) {
@@ -791,7 +791,7 @@ export class BehaviouralPanel {
               case 'analysisResult': {
                 const btn = document.getElementById('runBtn');
                 btn.disabled = false;
-                btn.innerHTML = '<i class="codicon codicon-play"></i> <span>Analyze with Fine-Tuned CodeT5</span>';
+                btn.innerHTML = '<i class="codicon codicon-play"></i> <span>Analyze Method</span>';
 
                 if (!msg.success) {
                   showError(msg.error);
