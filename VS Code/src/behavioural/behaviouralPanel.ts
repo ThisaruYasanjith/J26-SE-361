@@ -575,6 +575,13 @@ export class BehaviouralPanel {
             </div>
           </div>
 
+          <!-- Detected Governance Alerts (shown directly after Behavioral Category Changes) -->
+          <div class="section-title" style="margin-top: 14px;">
+            <i class="codicon codicon-warning"></i>
+            Detected Governance Alerts
+          </div>
+          <div id="governanceAlerts" style="margin-bottom: 12px;"></div>
+
           <!-- Stage 4: Behavioral Drift Metrics -->
           <div class="section-title">
             <i class="codicon codicon-graph"></i>
@@ -668,12 +675,6 @@ export class BehaviouralPanel {
             <div style="font-weight: 600; font-size: 12px; margin-bottom: 4px; color: #fbbf24;">💡 Developer Guidance:</div>
             <p id="devGuidanceText" style="font-size: 12px; margin: 0; color: var(--vscode-foreground); white-space: pre-line;"></p>
           </div>
-
-          <div class="section-title">
-            <i class="codicon codicon-warning"></i>
-            Detected Governance Alerts
-          </div>
-          <div id="governanceAlerts"></div>
         </div>
 
         <!-- Initial Workflow State Card -->
