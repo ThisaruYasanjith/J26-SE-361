@@ -59,6 +59,11 @@ export class BehaviouralPanel {
         case 'checkHealth': {
           const health = await BehaviouralPanel.checkServiceHealth();
           panel.webview.postMessage({ command: 'healthStatus', data: health });
+          if (health.connected && health.details?.status === 'ready') {
+            vscode.window.showInformationMessage(`CodeT5 Service Online (${health.details?.device?.toUpperCase() || 'Ready'})`);
+          } else {
+            vscode.window.showWarningMessage(`CodeT5 Service Offline: ${health.error || 'Please run inference_service.py on port 8000'}`);
+          }
           break;
         }
         case 'captureBaselineFromEditor': {
@@ -217,6 +222,8 @@ export class BehaviouralPanel {
           }
           .status-online { background-color: #1e3a2f; color: #4ade80; border: 1px solid #2e6047; }
           .status-offline { background-color: #3d1f24; color: #f87171; border: 1px solid #652b32; }
+          .status-checking { background-color: rgba(240, 173, 78, 0.2); color: #f0ad4e; border: 1px solid #f0ad4e; }
+          .spin-icon { animation: spin 1s linear infinite; display: inline-block; }
 
           .section-title {
             font-size: 13px;
@@ -486,8 +493,8 @@ export class BehaviouralPanel {
             <i class="codicon codicon-play"></i>
             <span>Analyze Method</span>
           </button>
-          <button class="secondary-btn" onclick="checkHealth()">
-            <i class="codicon codicon-refresh"></i> Refresh Status
+          <button id="refreshBtn" class="secondary-btn" onclick="checkHealth()" title="Refresh connection to CodeT5 inference service">
+            <i id="refreshIcon" class="codicon codicon-refresh"></i> <span id="refreshBtnText">Refresh Status</span>
           </button>
         </div>
 
@@ -697,6 +704,18 @@ export class BehaviouralPanel {
           }
 
           function checkHealth() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            const refreshIcon = document.getElementById('refreshIcon');
+            const refreshBtnText = document.getElementById('refreshBtnText');
+            if (refreshBtn) refreshBtn.disabled = true;
+            if (refreshIcon) refreshIcon.className = 'codicon codicon-sync spin-icon';
+            if (refreshBtnText) refreshBtnText.innerText = 'Checking...';
+
+            const statusPill = document.getElementById('serviceStatus');
+            const statusText = document.getElementById('statusText');
+            if (statusPill) statusPill.className = 'status-pill status-checking';
+            if (statusText) statusText.innerText = 'Checking CodeT5...';
+
             vscode.postMessage({ command: 'checkHealth' });
           }
 
@@ -761,11 +780,28 @@ export class BehaviouralPanel {
             const msg = event.data;
             switch (msg.command) {
               case 'healthStatus': {
+                const refreshBtn = document.getElementById('refreshBtn');
+                const refreshIcon = document.getElementById('refreshIcon');
+                const refreshBtnText = document.getElementById('refreshBtnText');
+                if (refreshBtn) refreshBtn.disabled = false;
+                if (refreshIcon) refreshIcon.className = 'codicon codicon-refresh';
+                if (refreshBtnText) {
+                  refreshBtnText.innerText = 'Refreshed!';
+                  setTimeout(() => {
+                    const btnTxt = document.getElementById('refreshBtnText');
+                    if (btnTxt) btnTxt.innerText = 'Refresh Status';
+                  }, 1500);
+                }
+
                 const statusPill = document.getElementById('serviceStatus');
                 const statusText = document.getElementById('statusText');
-                if (msg.data && msg.data.connected) {
+                if (msg.data && msg.data.connected && msg.data.details && msg.data.details.status === 'ready') {
                   statusPill.className = 'status-pill status-online';
-                  statusText.innerText = 'CodeT5 Online (' + (msg.data.details.device || 'Ready') + ')';
+                  const dev = msg.data.details.device ? msg.data.details.device.toUpperCase() : 'Ready';
+                  statusText.innerText = 'CodeT5 Online (' + dev + ')';
+                } else if (msg.data && msg.data.connected && msg.data.details && msg.data.details.status === 'error') {
+                  statusPill.className = 'status-pill status-offline';
+                  statusText.innerText = 'CodeT5 Error: ' + (msg.data.details.error || 'Model error');
                 } else {
                   statusPill.className = 'status-pill status-offline';
                   statusText.innerText = 'CodeT5 Offline (Port 8000)';
