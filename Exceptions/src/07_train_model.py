@@ -1,18 +1,15 @@
 """
-Dual-stream model for Java exception-handling defect classification
-with category holdout evaluation.
+Dual-stream model for Java exception-handling defect classification.
 
 Semantic stream: GraphCodeBERT -> 768-dim
 Structural stream: AST embedding + transformer -> 128-dim
 Fusion: concatenate -> MLP classifier -> 15 classes
         (clean + 14 defect categories)
 
-Category holdout: some categories are excluded from training but
-retained in validation and test. This tests generalization to
-defect types the model has never seen.
+Trains on ALL 15 categories (no holdout).
 
 Trains on data/processed/preprocessed.json and saves the best model
-to models/best_model_multiclass.pt.
+to models/best_model_categorizer.pt.
 
 Works on CPU, CUDA (Colab), or Apple Silicon MPS.
 
@@ -50,21 +47,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PREPROCESSED_PATH = PROJECT_ROOT / "data" / "processed" / "preprocessed.json"
 AST_VOCAB_PATH = PROJECT_ROOT / "data" / "processed" / "ast_vocab.json"
 CATEGORY_MAP_PATH = PROJECT_ROOT / "data" / "processed" / "category_map.json"
-CHECKPOINT_PATH = PROJECT_ROOT / "models" / "best_model_multiclass.pt"
-HISTORY_PATH = PROJECT_ROOT / "results" / "training_history_multiclass.csv"
+CHECKPOINT_PATH = PROJECT_ROOT / "models" / "best_model_categorizer.pt"
+HISTORY_PATH = PROJECT_ROOT / "results" / "training_history_categorizer.csv"
 
 GCBERT_MODEL_NAME = "microsoft/graphcodebert-base"
-
-# ---------- Category Holdout ----------
-# These categories are EXCLUDED from training but retained
-# in validation and test. The model is tested on whether it can
-# detect defect categories it has never seen during training.
-HOLDOUT_CATEGORIES = [
-    "swallows_declared_exception",
-    "corrupted_state_on_exception",
-    "inconsistent_with_precheck",
-    "empty_catch",
-]
 
 # Model hyperparameters
 SEMANTIC_DIM = 768
@@ -232,26 +218,6 @@ def split_by_field(records: list[dict]):
     return train, val, test
 
 
-def apply_holdout(train_records, val_records):
-    """
-    Remove HOLDOUT_CATEGORIES from the training set.
-    Split validation into seen and held-out subsets.
-    """
-    train_seen = [
-        r for r in train_records
-        if r["defect_category"] not in HOLDOUT_CATEGORIES
-    ]
-    val_seen = [
-        r for r in val_records
-        if r["defect_category"] not in HOLDOUT_CATEGORIES
-    ]
-    val_heldout = [
-        r for r in val_records
-        if r["defect_category"] in HOLDOUT_CATEGORIES
-    ]
-    return train_seen, val_seen, val_heldout
-
-
 # ============================================================
 # METRICS
 # ============================================================
@@ -372,36 +338,22 @@ def main() -> int:
     print(f"  {len(records)} records, AST vocab size: {ast_vocab_size}")
     print(f"  Categories: {len(category_map)}\n")
 
-    train_all, val_all, test_records = split_by_field(records)
-    train_seen, val_seen, val_heldout = apply_holdout(train_all, val_all)
+    train_records, val_records, test_records = split_by_field(records)
 
-    print(f"Category holdout:")
-    for cat in HOLDOUT_CATEGORIES:
-        print(f"  - {cat}")
-    print()
-    print(f"  train (all):                 {len(train_all)}")
-    print(f"  train (seen categories):     {len(train_seen)}")
-    print(f"  val (all):                   {len(val_all)}")
-    print(f"  val (seen categories):       {len(val_seen)}")
-    print(f"  val (held-out categories):   {len(val_heldout)}")
-    print(f"  test:                        {len(test_records)}")
+    print(f"  train:  {len(train_records)}")
+    print(f"  val:    {len(val_records)}")
+    print(f"  test:   {len(test_records)}")
     print()
 
     # ---- Datasets and loaders ----
     train_loader = DataLoader(
-        ExceptionDataset(train_seen),
+        ExceptionDataset(train_records),
         batch_size=BATCH_SIZE,
         shuffle=True,
         collate_fn=collate_fn,
     )
-    val_seen_loader = DataLoader(
-        ExceptionDataset(val_seen),
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        collate_fn=collate_fn,
-    )
-    val_heldout_loader = DataLoader(
-        ExceptionDataset(val_heldout),
+    val_loader = DataLoader(
+        ExceptionDataset(val_records),
         batch_size=BATCH_SIZE,
         shuffle=False,
         collate_fn=collate_fn,
@@ -423,8 +375,7 @@ def main() -> int:
 
     # ---- Training loop ----
     print("Starting training...\n")
-    best_heldout_f1 = 0.0
-    best_seen_f1_at_best = 0.0
+    best_val_f1 = 0.0
     patience_counter = 0
     history = []
 
@@ -433,52 +384,41 @@ def main() -> int:
         train_loss, train_metrics = train_one_epoch(
             model, train_loader, optimizer, criterion, device, scheduler
         )
-        seen_loss, seen_metrics = evaluate(model, val_seen_loader, criterion, device)
-        heldout_loss, heldout_metrics = evaluate(
-            model, val_heldout_loader, criterion, device
-        )
+        val_loss, val_metrics = evaluate(model, val_loader, criterion, device)
         elapsed = time.time() - t0
 
         print(f"Epoch {epoch}/{EPOCHS}  ({elapsed:.1f}s)")
-        print(f"  train            loss={train_loss:.4f}  acc={train_metrics['accuracy']:.4f}  "
+        print(f"  train  loss={train_loss:.4f}  acc={train_metrics['accuracy']:.4f}  "
               f"macroF1={train_metrics['macro_f1']:.4f}")
-        print(f"  val (seen)       loss={seen_loss:.4f}  acc={seen_metrics['accuracy']:.4f}  "
-              f"macroF1={seen_metrics['macro_f1']:.4f}")
-        print(f"  val (held-out)   loss={heldout_loss:.4f}  acc={heldout_metrics['accuracy']:.4f}  "
-              f"macroF1={heldout_metrics['macro_f1']:.4f}")
+        print(f"  val    loss={val_loss:.4f}  acc={val_metrics['accuracy']:.4f}  "
+              f"macroF1={val_metrics['macro_f1']:.4f}")
 
         history.append({
             "epoch": epoch,
             "train_loss": train_loss,
             "train_acc": train_metrics["accuracy"],
             "train_macro_f1": train_metrics["macro_f1"],
-            "val_seen_loss": seen_loss,
-            "val_seen_acc": seen_metrics["accuracy"],
-            "val_seen_macro_f1": seen_metrics["macro_f1"],
-            "val_seen_weighted_f1": seen_metrics["weighted_f1"],
-            "val_heldout_loss": heldout_loss,
-            "val_heldout_acc": heldout_metrics["accuracy"],
-            "val_heldout_macro_f1": heldout_metrics["macro_f1"],
-            "val_heldout_weighted_f1": heldout_metrics["weighted_f1"],
+            "val_loss": val_loss,
+            "val_acc": val_metrics["accuracy"],
+            "val_macro_f1": val_metrics["macro_f1"],
+            "val_weighted_f1": val_metrics["weighted_f1"],
         })
 
-        # Save best model based on HELD-OUT macro F1
-        if heldout_metrics["macro_f1"] > best_heldout_f1:
-            best_heldout_f1 = heldout_metrics["macro_f1"]
-            best_seen_f1_at_best = seen_metrics["macro_f1"]
+        # Save best model based on validation macro F1
+        if val_metrics["macro_f1"] > best_val_f1:
+            best_val_f1 = val_metrics["macro_f1"]
             patience_counter = 0
             CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
             torch.save({
                 "model_state_dict": model.state_dict(),
                 "epoch": epoch,
-                "val_heldout_macro_f1": heldout_metrics["macro_f1"],
-                "val_seen_macro_f1": seen_metrics["macro_f1"],
+                "val_macro_f1": val_metrics["macro_f1"],
+                "val_accuracy": val_metrics["accuracy"],
                 "ast_vocab_size": ast_vocab_size,
                 "num_categories": NUM_CATEGORIES,
-                "holdout_categories": HOLDOUT_CATEGORIES,
                 "category_map": category_map,
             }, CHECKPOINT_PATH)
-            print(f"  -> saved best model (held-out macro F1={best_heldout_f1:.4f})")
+            print(f"  -> saved best model (val macro F1={best_val_f1:.4f})")
         else:
             patience_counter += 1
             print(f"  -> no improvement ({patience_counter}/{EARLY_STOP_PATIENCE})")
@@ -500,20 +440,7 @@ def main() -> int:
     print("=" * 60)
     print("FINAL RESULTS")
     print("=" * 60)
-    print(f"Best held-out validation macro F1:  {best_heldout_f1:.4f}")
-    print(f"Seen-category validation macro F1:  {best_seen_f1_at_best:.4f}")
-    print(f"Generalization gap:                 {best_seen_f1_at_best - best_heldout_f1:.4f}")
-    print()
-    print(f"Interpretation:")
-    gap = best_seen_f1_at_best - best_heldout_f1
-    if gap < 0.10:
-        print("  Strong generalization — model learned abstract defect patterns.")
-    elif gap < 0.20:
-        print("  Moderate generalization — model partially relies on category features.")
-    elif gap < 0.35:
-        print("  Weak generalization — model relies on category-specific patterns.")
-    else:
-        print("  Poor generalization — model is mostly memorizing categories.")
+    print(f"Best validation macro F1:  {best_val_f1:.4f}")
     print()
     print(f"Best model saved to: {CHECKPOINT_PATH.relative_to(PROJECT_ROOT)}")
 
