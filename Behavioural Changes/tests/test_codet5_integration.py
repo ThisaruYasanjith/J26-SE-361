@@ -226,3 +226,26 @@ def test_10_fastapi_analyze_mocked_inference():
         # Bad request: empty methods
         bad_resp = client.post("/analyze", json={"old_method": "", "new_method": ""})
         assert bad_resp.status_code in [400, 503]
+
+
+def test_11_fastapi_analyze_pipeline_signature_mismatch():
+    """Verify that /analyze_pipeline correctly detects and reports signature mismatch."""
+    with TestClient(app) as client:
+        payload = {
+            "old_method": "public int calculate(int x) { return x * 2; }",
+            "new_method": "public double calculate(double x) { return x * 2.0; }"
+        }
+        resp = client.post("/analyze_pipeline", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "signature_mismatch"
+        assert data["stage2_signature"]["is_same_signature"] is False
+        assert len(data["stage2_signature"]["mismatches"]) > 0
+
+
+def test_12_fastapi_analyze_pipeline_empty_validation():
+    """Verify that /analyze_pipeline rejects empty method inputs."""
+    with TestClient(app) as client:
+        bad_resp = client.post("/analyze_pipeline", json={"old_method": "", "new_method": ""})
+        assert bad_resp.status_code == 400
+
