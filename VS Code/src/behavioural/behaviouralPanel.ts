@@ -452,9 +452,9 @@ export class BehaviouralPanel {
           <select id="presetSelect" onchange="loadPreset()">
             <option value="001">Dataset #001: Files.copy -> updateStatus & deleteIfExists (DB Write Added)</option>
             <option value="003">Dataset #003: findById -> writeString & findById (File Operation Added)</option>
-            <option value="004">Dataset #004: Added Null Check & IllegalArgumentException</option>
-            <option value="race">Race Condition Demonstration: CacheManager.java (Thread Mutation)</option>
-            <option value="custom">-- Custom Java Methods --</option>
+            <option value="004">Dataset #004: Added Null Check & IllegalArgumentException (Exception Added)</option>
+            <option value="mismatch">Negative Test: calculateFee (Mismatched Parameter Signature)</option>
+            <option value="custom">-- Custom Java Methods (Capture from Editor) --</option>
           </select>
         </div>
 
@@ -680,16 +680,18 @@ export class BehaviouralPanel {
           <div id="governanceAlerts"></div>
         </div>
 
-        <!-- Static Fallback Card from Original Prototype UI -->
-        <div id="defaultCard" class="issue-card">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <strong>Race Condition Detected</strong>
-            <span class="tag tag-high">High</span>
+        <!-- Initial Workflow State Card -->
+        <div id="initialGuidanceCard" class="issue-card" style="border-left: 4px solid var(--vscode-editorInfo-foreground); background: rgba(56, 189, 248, 0.05);">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <i class="codicon codicon-info" style="color: var(--vscode-editorInfo-foreground); font-size: 16px;"></i>
+            <strong style="color: var(--vscode-foreground);">Workflow Instructions:</strong>
           </div>
-          <p style="font-size: 12px; margin: 0; color: var(--vscode-descriptionForeground);">
-            Shared state accessed across worker threads without synchronization lock.
-          </p>
-          <div class="code-box">CacheManager.java &rarr; line 78</div>
+          <ol style="margin: 0; padding-left: 20px; font-size: 12px; line-height: 1.6; color: var(--vscode-descriptionForeground);">
+            <li>Open your Java file in the editor and select/highlight any Java method.</li>
+            <li>Click <strong>Capture Selection</strong> to populate <em>Baseline Java Method (v1)</em>.</li>
+            <li>Refactor the method directly in your editor and press <kbd>Ctrl+S</kbd> to save. The modified code will automatically populate into <em>Modified Java Method (v2)</em>!</li>
+            <li>Click <strong>Analyze with Fine-Tuned CodeT5</strong> to run the full 6-stage behavioral verification pipeline!</li>
+          </ol>
         </div>
 
         <script>
@@ -708,9 +710,9 @@ export class BehaviouralPanel {
               v1: "public void checkMessageRecordRequest(MessageRecord messageRecord, Long messageId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    logger.trace(\\\"MessageRecord operation started\\\");\\n    double averageAmount = amount / Math.max(quantity, 1);\\n}",
               v2: "public void checkMessageRecordRequest(MessageRecord messageRecord, Long messageId, java.nio.file.Path path, java.nio.file.Path backupPath, String message, double amount, int quantity, boolean enabled) throws java.io.IOException {\\n    logger.trace(\\\"MessageRecord operation started\\\");\\n    double averageAmount = amount / Math.max(quantity, 1);\\n    if (messageId == null) {\\n        throw new IllegalArgumentException(\\\"identifier is required\\\");\\n    }\\n}"
             },
-            "race": {
-              v1: "public void updateCache(String key, Object val) {\\n    cacheMap.put(key, val);\\n}",
-              v2: "public void updateCache(String key, Object val) {\\n    // Race condition: unsynchronized state update across threads\\n    this.lastAccessTime = System.currentTimeMillis();\\n    cacheMap.put(key, val);\\n}"
+            "mismatch": {
+              v1: "public double calculateFee(double baseAmount, int durationDays) {\\n    return baseAmount * 0.05 * durationDays;\\n}",
+              v2: "public double calculateFee(double baseAmount, String durationTier) {\\n    return baseAmount * 0.08;\\n}"
             }
           };
 
@@ -842,7 +844,9 @@ export class BehaviouralPanel {
                 }
 
                 const data = msg.data;
-                document.getElementById('defaultCard').style.display = 'none';
+                // Hide initial workflow guidance card on first analysis
+                const guidanceCard = document.getElementById('initialGuidanceCard');
+                if (guidanceCard) guidanceCard.style.display = 'none';
 
                 // Render Stage 2: Same-Signature Verification
                 const sig = data.stage2_signature;
@@ -1028,13 +1032,16 @@ export class BehaviouralPanel {
                   document.getElementById('devGuidanceText').innerText = s6.developer_guidance || 'No specific developer guidance.';
                 }
 
-                // Render dynamic alerts
+                // Render dynamic governance alerts (derived from stage 3 & 4 data)
                 const alertsDiv = document.getElementById('governanceAlerts');
                 alertsDiv.innerHTML = '';
 
-                if (comp.drift_detected) {
-                  const added = comp.added_categories || [];
-                  if (added.includes('EXCEPTION_BEHAVIOR')) {
+                const driftDetected = (data.stage4_drift && data.stage4_drift.drift_detected) ||
+                                      (s3.added_categories && s3.added_categories.length > 0);
+                const addedCatsForAlerts = s3.added_categories || [];
+
+                if (driftDetected && addedCatsForAlerts.length > 0) {
+                  if (addedCatsForAlerts.includes('EXCEPTION_BEHAVIOR')) {
                     alertsDiv.innerHTML += \`
                       <div class="issue-card">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1047,7 +1054,7 @@ export class BehaviouralPanel {
                       </div>
                     \`;
                   }
-                  if (added.includes('DATABASE_WRITE') || added.includes('FILE_OPERATION') || added.includes('EXTERNAL_CALL')) {
+                  if (addedCatsForAlerts.includes('DATABASE_WRITE') || addedCatsForAlerts.includes('FILE_OPERATION') || addedCatsForAlerts.includes('EXTERNAL_CALL')) {
                     alertsDiv.innerHTML += \`
                       <div class="issue-card">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1060,7 +1067,7 @@ export class BehaviouralPanel {
                       </div>
                     \`;
                   }
-                  if (added.includes('STATE_MUTATION')) {
+                  if (addedCatsForAlerts.includes('STATE_MUTATION')) {
                     alertsDiv.innerHTML += \`
                       <div class="issue-card">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1073,11 +1080,25 @@ export class BehaviouralPanel {
                       </div>
                     \`;
                   }
+                  if (alertsDiv.innerHTML === '') {
+                    // Drift detected but no specific category alert
+                    alertsDiv.innerHTML = \`
+                      <div class="issue-card" style="border-color: #f0ad4e; background: rgba(240,173,78,0.1);">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                          <strong>Behavioral Drift Detected</strong>
+                          <span class="tag tag-med">Warning</span>
+                        </div>
+                        <p style="font-size:12px; margin:4px 0; color:var(--vscode-descriptionForeground);">
+                          Behavioral categories differ between baseline and modified versions. Review added/removed categories above.
+                        </p>
+                      </div>
+                    \`;
+                  }
                 } else {
                   alertsDiv.innerHTML = \`
-                    <div class="issue-card">
+                    <div class="issue-card" style="border-color: #2e6047; background: rgba(74,222,128,0.06);">
                       <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <strong>Behavioral Integrity Maintained</strong>
+                        <strong style="color: #4ade80;">✅ Behavioral Integrity Maintained</strong>
                         <span class="tag tag-low">Passed</span>
                       </div>
                       <p style="font-size:12px; margin:4px 0; color:var(--vscode-descriptionForeground);">
