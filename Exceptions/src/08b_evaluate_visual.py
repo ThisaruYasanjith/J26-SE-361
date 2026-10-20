@@ -1,12 +1,16 @@
 """
-src/08b_evaluate_visual.py — Evaluate all five methods with separate comparisons.
+src/08b_evaluate_visual.py — Evaluate all 5 methods with binary + multi-class metrics.
+
+Loads:
+  models/ablation_semantic_15class.pt
+  models/ablation_structural_15class.pt
+  models/ablation_combined_15class.pt
+  data/processed/file_level_results.csv (for PMD/SpotBugs)
 
 Produces:
-  results/figures/confusion_*.png          (5 confusion matrices)
-  results/figures/comparison_combined.png  (Combined vs PMD vs SpotBugs)
-  results/figures/comparison_semantic.png  (Semantic only vs PMD vs SpotBugs)
-  results/figures/comparison_structural.png (Structural only vs PMD vs SpotBugs)
-  results/summary_metrics.csv              (all 5 methods)
+  results/figures/comparison_multiclass.png       (3 ML models, multi-class metrics)
+  results/summary_metrics.csv                     (binary metrics for all 5)
+  results/multiclass_metrics.csv                  (multi-class metrics for 3 ML models)
 
 Run from project root:
     python src/08b_evaluate_visual.py
@@ -21,11 +25,10 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
 import torch
 import torch.nn as nn
 from sklearn.metrics import (
-    accuracy_score, confusion_matrix, f1_score, matthews_corrcoef,
+    accuracy_score, f1_score, matthews_corrcoef,
     precision_score, recall_score,
 )
 from torch.utils.data import DataLoader, Dataset
@@ -39,10 +42,12 @@ from transformers import AutoModel
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PREPROCESSED_PATH = PROJECT_ROOT / "data" / "processed" / "preprocessed.json"
 AST_VOCAB_PATH = PROJECT_ROOT / "data" / "processed" / "ast_vocab.json"
+CATEGORY_MAP_PATH = PROJECT_ROOT / "data" / "processed" / "category_map.json"
 STATIC_ANALYSIS_PATH = PROJECT_ROOT / "data" / "processed" / "file_level_results.csv"
 MODELS_DIR = PROJECT_ROOT / "models"
 FIGURES_DIR = PROJECT_ROOT / "results" / "figures"
 SUMMARY_CSV = PROJECT_ROOT / "results" / "summary_metrics.csv"
+MULTICLASS_CSV = PROJECT_ROOT / "results" / "multiclass_metrics.csv"
 
 GCBERT_MODEL_NAME = "microsoft/graphcodebert-base"
 
@@ -53,16 +58,17 @@ AST_NUM_LAYERS = 2
 AST_NUM_HEADS = 4
 AST_FF_DIM = 512
 FUSION_HIDDEN = 256
-NUM_CLASSES = 2
+NUM_CATEGORIES = 15
 BATCH_SIZE = 16
 
+# ---- 3 ML models (all 15-class) ----
 METHOD_CONFIGS = [
-    {"name": "Semantic only",   "checkpoint": "ablation_semantic.pt",   "type": "semantic"},
-    {"name": "Structural only", "checkpoint": "ablation_structural.pt", "type": "structural"},
-    {"name": "Combined",        "checkpoint": "ablation_combined.pt",   "type": "combined"},
+    {"name": "Semantic only",   "checkpoint": "ablation_semantic_15class.pt",   "type": "semantic"},
+    {"name": "Structural only", "checkpoint": "ablation_structural_15class.pt", "type": "structural"},
+    {"name": "Combined",        "checkpoint": "ablation_combined_15class.pt",   "type": "combined"},
 ]
 
-# ---- Colors for bar charts ----
+# ---- Colors ----
 COLORS = {
     "PMD":             "#F39C12",
     "SpotBugs":        "#E74C3C",
@@ -71,7 +77,6 @@ COLORS = {
     "Combined":        "#2E86DE",
 }
 
-# ---- Descriptive titles for confusion matrices ----
 TITLE_MAP = {
     "PMD":             "PMD (Static Analysis)",
     "SpotBugs":        "SpotBugs (Static Analysis)",
@@ -98,6 +103,7 @@ class ExceptionDataset(Dataset):
             "input_ids": torch.tensor(r["input_ids"], dtype=torch.long),
             "attention_mask": torch.tensor(r["attention_mask"], dtype=torch.long),
             "ast_ids": torch.tensor(r["ast_ids"], dtype=torch.long),
+            "category_id": torch.tensor(r["category_id"], dtype=torch.long),
             "label": torch.tensor(r["label"], dtype=torch.long),
         }
 
@@ -107,12 +113,13 @@ def collate_fn(batch):
         "input_ids": torch.stack([b["input_ids"] for b in batch]),
         "attention_mask": torch.stack([b["attention_mask"] for b in batch]),
         "ast_ids": torch.stack([b["ast_ids"] for b in batch]),
+        "category_id": torch.stack([b["category_id"] for b in batch]),
         "label": torch.stack([b["label"] for b in batch]),
     }
 
 
 # ============================================================
-# MODELS
+# MODELS (must match 09_ablation.py)
 # ============================================================
 
 class SemanticOnlyModel(nn.Module):
@@ -122,7 +129,7 @@ class SemanticOnlyModel(nn.Module):
         self.classifier = nn.Sequential(
             nn.Linear(SEMANTIC_DIM, FUSION_HIDDEN),
             nn.ReLU(), nn.Dropout(0.2),
-            nn.Linear(FUSION_HIDDEN, NUM_CLASSES),
+            nn.Linear(FUSION_HIDDEN, NUM_CATEGORIES),
         )
 
     def forward(self, input_ids, attention_mask, ast_ids=None):
@@ -144,7 +151,7 @@ class StructuralOnlyModel(nn.Module):
         self.classifier = nn.Sequential(
             nn.Linear(AST_HIDDEN_DIM, FUSION_HIDDEN),
             nn.ReLU(), nn.Dropout(0.2),
-            nn.Linear(FUSION_HIDDEN, NUM_CLASSES),
+            nn.Linear(FUSION_HIDDEN, NUM_CATEGORIES),
         )
 
     def forward(self, input_ids=None, attention_mask=None, ast_ids=None):
@@ -173,7 +180,7 @@ class DualStreamModel(nn.Module):
         self.classifier = nn.Sequential(
             nn.Linear(SEMANTIC_DIM + AST_HIDDEN_DIM, FUSION_HIDDEN),
             nn.ReLU(), nn.Dropout(0.2),
-            nn.Linear(FUSION_HIDDEN, NUM_CLASSES),
+            nn.Linear(FUSION_HIDDEN, NUM_CATEGORIES),
         )
 
     def forward(self, input_ids, attention_mask, ast_ids):
@@ -209,24 +216,30 @@ def get_device():
 
 @torch.no_grad()
 def predict_all(model, loader, device):
+    """Return (category_true, category_pred, binary_true, binary_pred)."""
     model.eval()
-    out = []
+    cat_true_all, cat_pred_all = [], []
     for batch in loader:
         ids = batch["input_ids"].to(device)
         mask = batch["attention_mask"].to(device)
         ast = batch["ast_ids"].to(device)
-        preds = model(ids, mask, ast).argmax(-1).cpu().numpy()
-        labels = batch["label"].cpu().numpy()
-        for lab, p in zip(labels, preds):
-            out.append({"label": int(lab), "pred": int(p)})
-    return out
+        cat_true = batch["category_id"].cpu().numpy()
+        cat_pred = model(ids, mask, ast).argmax(-1).cpu().numpy()
+        cat_true_all.extend(cat_true.tolist())
+        cat_pred_all.extend(cat_pred.tolist())
+
+    # Aggregate to binary
+    bin_true = [1 if c > 0 else 0 for c in cat_true_all]
+    bin_pred = [1 if c > 0 else 0 for c in cat_pred_all]
+
+    return cat_true_all, cat_pred_all, bin_true, bin_pred
 
 
 # ============================================================
 # METRICS
 # ============================================================
 
-def compute_metrics(y_true, y_pred):
+def binary_metrics(y_true, y_pred):
     if not y_true:
         return {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0, "mcc": 0.0}
     return {
@@ -238,54 +251,62 @@ def compute_metrics(y_true, y_pred):
     }
 
 
+def multiclass_metrics(cat_true, cat_pred):
+    return {
+        "accuracy": accuracy_score(cat_true, cat_pred),
+        "macro_f1": f1_score(cat_true, cat_pred, average="macro", zero_division=0),
+        "weighted_f1": f1_score(cat_true, cat_pred, average="weighted", zero_division=0),
+    }
+
+
 # ============================================================
 # PLOTS
 # ============================================================
 
-def plot_confusion(y_true, y_pred, title, cmap, path):
-    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
-    fig, ax = plt.subplots(figsize=(6, 5))
-    sns.heatmap(
-        cm, annot=True, fmt="d", cmap=cmap, cbar=False,
-        xticklabels=["Pred Clean", "Pred Defect"],
-        yticklabels=["Actual Clean", "Actual Defect"],
-        annot_kws={"size": 20, "weight": "bold"},
-        linewidths=1, linecolor="white", ax=ax,
-    )
-    ax.set_title(f"{title}\nConfusion Matrix", fontsize=13, fontweight="bold")
-    plt.tight_layout()
-    plt.savefig(path, dpi=150)
-    plt.close()
+def plot_multiclass_comparison(multiclass_preds, title, filename):
+    """
+    Bar chart of multi-class metrics for the 3 ML models.
 
+    Metrics shown: Accuracy, Macro-F1, Weighted-F1.
+    Static tools (PMD/SpotBugs) are NOT included because they are
+    binary detectors and cannot produce a 15-class prediction.
+    """
+    models = ["Semantic only", "Structural only", "Combined"]
+    metric_keys = ["accuracy", "macro_f1", "weighted_f1"]
+    metric_labels = ["Accuracy", "Macro-F1", "Weighted-F1"]
 
-def plot_comparison_bar(methods_in_chart, all_metrics, title, filename):
-    metric_keys = ["accuracy", "precision", "recall", "f1", "mcc"]
-    metric_labels = ["Accuracy", "Precision", "Recall", "F1", "MCC"]
+    # Compute metrics per model
+    data = {}
+    for name in models:
+        if name not in multiclass_preds:
+            continue
+        ct, cp = multiclass_preds[name]
+        data[name] = multiclass_metrics(ct, cp)
 
     x = np.arange(len(metric_keys))
-    n = len(methods_in_chart)
+    n = len(data)
     w = 0.8 / n
 
     fig, ax = plt.subplots(figsize=(12, 6))
-    for i, method in enumerate(methods_in_chart):
-        vals = [all_metrics[method][k] for k in metric_keys]
+    for i, name in enumerate(data):
+        vals = [data[name][k] for k in metric_keys]
         bars = ax.bar(
             x + i * w - (0.8 - w) / 2, vals, w,
-            label=TITLE_MAP.get(method, method),
-            color=COLORS[method],
+            label=TITLE_MAP.get(name, name),
+            color=COLORS[name],
             edgecolor="white", linewidth=1,
         )
         for b, v in zip(bars, vals):
             ax.text(
                 b.get_x() + b.get_width() / 2, b.get_height() + 0.01,
-                f"{v:.2f}", ha="center", va="bottom", fontsize=8, rotation=90,
+                f"{v:.3f}", ha="center", va="bottom", fontsize=9,
             )
     ax.set_xticks(x)
     ax.set_xticklabels(metric_labels, fontsize=12)
-    ax.set_ylim(0, 1.15)
+    ax.set_ylim(0, 1.05)
     ax.set_ylabel("Score", fontsize=12)
     ax.set_title(title, fontsize=14, fontweight="bold")
-    ax.legend(fontsize=9, loc="lower right")
+    ax.legend(fontsize=10, loc="lower right")
     ax.grid(axis="y", alpha=0.3)
     plt.tight_layout()
     plt.savefig(filename, dpi=150)
@@ -305,8 +326,13 @@ def main():
         records = json.load(f)
     with AST_VOCAB_PATH.open(encoding="utf-8") as f:
         ast_vocab_size = len(json.load(f))
+    with CATEGORY_MAP_PATH.open(encoding="utf-8") as f:
+        category_map = json.load(f)
+    id_to_cat = {v: k for k, v in category_map.items()}
+
     test_records = [r for r in records if r["split"] == "test"]
-    print(f"Test records: {len(test_records)}\n")
+    print(f"Test records: {len(test_records)}")
+    print(f"Categories:   {len(category_map)}\n")
 
     # ---- Load static analysis ----
     static = {}
@@ -322,80 +348,61 @@ def main():
         batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn,
     )
 
-    predictions = {}
+    binary_preds = {}
+    multiclass_preds = {}
+
     for cfg in METHOD_CONFIGS:
         ckpt = MODELS_DIR / cfg["checkpoint"]
         if not ckpt.exists():
-            print(f"⚠️  {cfg['name']}: {ckpt} not found — skipping")
+            print(f"⚠️  {cfg['name']}: {ckpt} not found — skipping\n")
             continue
         print(f"Loading {cfg['name']} from {ckpt.name}...")
         model = build_model(cfg["type"], ast_vocab_size).to(device)
         model.load_state_dict(torch.load(ckpt, map_location=device)["model_state_dict"])
-        predictions[cfg["name"]] = predict_all(model, loader, device)
+
+        cat_true, cat_pred, bin_true, bin_pred = predict_all(model, loader, device)
+        multiclass_preds[cfg["name"]] = (cat_true, cat_pred)
+        binary_preds[cfg["name"]] = (bin_true, bin_pred)
         print(f"  Done.\n")
 
     # ---- Static tool predictions ----
-    pmd_preds, sb_preds = [], []
+    pmd_true, pmd_pred = [], []
+    sb_true, sb_pred = [], []
     for r in test_records:
         row = static.get(r["id"] + ".java", {})
         m = (row.get("candidate_category_match") or "").strip().upper()
         t = (row.get("candidate_matching_tools") or "").strip()
-        pmd_preds.append({"label": int(r["label"]), "pred": 1 if (m == "YES" and "PMD" in t) else 0})
-        sb_preds.append({"label": int(r["label"]), "pred": 1 if (m == "YES" and "SpotBugs" in t) else 0})
-    predictions["PMD"] = pmd_preds
-    predictions["SpotBugs"] = sb_preds
+        lab = int(r["label"])
+        pmd_true.append(lab)
+        pmd_pred.append(1 if (m == "YES" and "PMD" in t) else 0)
+        sb_true.append(lab)
+        sb_pred.append(1 if (m == "YES" and "SpotBugs" in t) else 0)
 
-    # ---- Compute metrics ----
-    all_metrics = {}
-    for name, preds in predictions.items():
-        all_metrics[name] = compute_metrics(
-            [p["label"] for p in preds], [p["pred"] for p in preds]
-        )
+    binary_preds["PMD"] = (pmd_true, pmd_pred)
+    binary_preds["SpotBugs"] = (sb_true, sb_pred)
 
-    # ---- Confusion matrices ----
+    # ---- Compute binary metrics (written to CSV, not plotted) ----
+    binary_metric_map = {}
+    for name, (yt, yp) in binary_preds.items():
+        binary_metric_map[name] = binary_metrics(yt, yp)
+
+    # ---- Multi-class comparison figure ----
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    cmaps = {
-        "PMD": "Oranges", "SpotBugs": "Reds",
-        "Semantic only": "Purples", "Structural only": "Greens", "Combined": "Blues",
-    }
-    for name, preds in predictions.items():
-        plot_confusion(
-            [p["label"] for p in preds],
-            [p["pred"] for p in preds],
-            TITLE_MAP[name],
-            cmaps[name],
-            FIGURES_DIR / f"confusion_{name.replace(' ', '_').lower()}.png",
-        )
-
-    # ---- Three separate comparison charts ----
-    plot_comparison_bar(
-        ["PMD", "SpotBugs", "Combined"],
-        all_metrics,
-        "Combined Model (GraphCodeBERT + AST) vs Static Analysis",
-        FIGURES_DIR / "comparison_combined.png",
-    )
-    plot_comparison_bar(
-        ["PMD", "SpotBugs", "Semantic only"],
-        all_metrics,
-        "Semantic-Only Model (GraphCodeBERT) vs Static Analysis",
-        FIGURES_DIR / "comparison_semantic.png",
-    )
-    plot_comparison_bar(
-        ["PMD", "SpotBugs", "Structural only"],
-        all_metrics,
-        "Structural-Only Model (AST) vs Static Analysis",
-        FIGURES_DIR / "comparison_structural.png",
+    plot_multiclass_comparison(
+        multiclass_preds,
+        "Multi-Class Performance: Semantic-Only vs Structural-Only vs Combined",
+        FIGURES_DIR / "comparison_multiclass.png",
     )
 
-    # ---- Summary CSV ----
+    # ---- Summary CSV (binary, for internal reference / Table 2 source) ----
     SUMMARY_CSV.parent.mkdir(parents=True, exist_ok=True)
     with SUMMARY_CSV.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["method", "accuracy", "precision", "recall", "f1", "mcc"])
         for name in ["PMD", "SpotBugs", "Semantic only", "Structural only", "Combined"]:
-            if name not in all_metrics:
+            if name not in binary_metric_map:
                 continue
-            m = all_metrics[name]
+            m = binary_metric_map[name]
             w.writerow([
                 TITLE_MAP.get(name, name),
                 f"{m['accuracy']:.4f}",
@@ -405,22 +412,54 @@ def main():
                 f"{m['mcc']:.4f}",
             ])
 
-    # ---- Console summary ----
+    # ---- Multi-class CSV (3 ML models only) ----
+    with MULTICLASS_CSV.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["method", "accuracy", "macro_f1", "weighted_f1"])
+        for name in ["Semantic only", "Structural only", "Combined"]:
+            if name not in multiclass_preds:
+                continue
+            cat_true, cat_pred = multiclass_preds[name]
+            m = multiclass_metrics(cat_true, cat_pred)
+            w.writerow([
+                TITLE_MAP.get(name, name),
+                f"{m['accuracy']:.4f}",
+                f"{m['macro_f1']:.4f}",
+                f"{m['weighted_f1']:.4f}",
+            ])
+
+    # ---- Console summary: binary ----
     print("=" * 95)
-    print("SUMMARY — All methods on test set")
+    print("BINARY METRICS — All 5 methods")
     print("=" * 95)
     print(f"{'Method':<45} {'Acc':>8} {'Prec':>8} {'Rec':>8} {'F1':>8} {'MCC':>8}")
     print("-" * 95)
     for name in ["PMD", "SpotBugs", "Semantic only", "Structural only", "Combined"]:
-        if name not in all_metrics:
+        if name not in binary_metric_map:
             continue
-        m = all_metrics[name]
+        m = binary_metric_map[name]
         print(f"{TITLE_MAP.get(name, name):<45} "
               f"{m['accuracy']:>8.4f} {m['precision']:>8.4f} "
               f"{m['recall']:>8.4f} {m['f1']:>8.4f} {m['mcc']:>8.4f}")
 
+    # ---- Console summary: multi-class ----
+    print()
+    print("=" * 95)
+    print("MULTI-CLASS METRICS — 3 ML models (15 classes)")
+    print("=" * 95)
+    print(f"{'Method':<45} {'Acc':>8} {'MacroF1':>10} {'WeightedF1':>12}")
+    print("-" * 95)
+    for name in ["Semantic only", "Structural only", "Combined"]:
+        if name not in multiclass_preds:
+            continue
+        cat_true, cat_pred = multiclass_preds[name]
+        m = multiclass_metrics(cat_true, cat_pred)
+        print(f"{TITLE_MAP.get(name, name):<45} "
+              f"{m['accuracy']:>8.4f} {m['macro_f1']:>10.4f} {m['weighted_f1']:>12.4f}")
+
     print(f"\nFigures saved to {FIGURES_DIR}")
-    print(f"Summary CSV: {SUMMARY_CSV}")
+    print(f"Binary metrics:        {SUMMARY_CSV}")
+    print(f"Multi-class metrics:   {MULTICLASS_CSV}")
     return 0
 
 
