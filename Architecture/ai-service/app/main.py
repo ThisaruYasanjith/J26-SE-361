@@ -8,6 +8,15 @@ from fastapi.responses import JSONResponse
 
 from app.config import ServiceConfig
 from app.context_loader import ContextLoadError, ProjectContextLoader
+from app.inference import (
+    InferenceError,
+    ModelStatus,
+    QwenModelService,
+    RuleGenerationRequest,
+    RuleGenerationResponse,
+    RuleGenerationService,
+    RuleModelBackend,
+)
 from app.rag import (
     ArchitectureRetriever,
     ContextDocumentBuilder,
@@ -23,7 +32,8 @@ from app.rag import (
 logger = logging.getLogger(__name__)
 
 
-def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBackend | None = None) -> FastAPI:
+def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBackend | None = None,
+               model: RuleModelBackend | None = None) -> FastAPI:
     settings = config if config is not None else ServiceConfig.from_env()
     loader = ProjectContextLoader(settings.project_context_path)
     retriever = ArchitectureRetriever(
@@ -31,6 +41,8 @@ def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBacken
         ContextDocumentBuilder(settings.base_rules_path, settings.custom_rules_path),
         embedder if embedder is not None else SentenceTransformerEmbedder(settings.embedding_model, settings.embedding_cache_dir),
     )
+    base_model = model if model is not None else QwenModelService(settings.model_id, settings.model_max_new_tokens)
+    generator = RuleGenerationService(retriever, base_model, settings.rag_top_k)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -46,6 +58,11 @@ def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBacken
     application.state.config = settings
     application.state.context_loader = loader
     application.state.rag_retriever = retriever
+    application.state.rule_generator = generator
+
+    @application.exception_handler(InferenceError)
+    async def inference_error(request: Request, error: InferenceError) -> JSONResponse:
+        return JSONResponse(status_code=error.status_code, content={"detail": str(error)})
 
     @application.exception_handler(RAGError)
     async def rag_error(request: Request, error: RAGError) -> JSONResponse:
@@ -75,6 +92,14 @@ def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBacken
     @application.post("/rag/retrieve", response_model=RetrievalResponse, response_model_exclude_none=True)
     def retrieve_rag(request: RetrievalRequest) -> RetrievalResponse:
         return RetrievalResponse(results=retriever.retrieve(request.query, request.top_k))
+
+    @application.get("/model/status", response_model=ModelStatus)
+    def model_status() -> ModelStatus:
+        return ModelStatus(loaded=base_model.is_loaded, model_id=base_model.model_id)
+
+    @application.post("/rules/generate", response_model=RuleGenerationResponse)
+    def generate_rule(request: RuleGenerationRequest) -> RuleGenerationResponse:
+        return generator.generate(request)
 
     return application
 
