@@ -263,6 +263,7 @@ def test_endpoint_returns_raw_output_parsed_json_and_status_after_load(environme
         async with application.router.lifespan_context(application):
             status, response = await request_json(application, "/rules/generate", {"requirement": "Deny access."})
             assert status == 200 and response["json_valid"] is True
+            assert response["schema_valid"] is True and response["validation_errors"] == []
             assert response["generated_text"] == model.output
             assert response["rule"]["status"] == "AMBIGUOUS"
             assert len(response["retrieved_context"]) == 8
@@ -309,7 +310,10 @@ def test_endpoint_reports_invalid_json_without_discarding_output(environment, ou
         async with application.router.lifespan_context(application):
             status, response = await request_json(application, "/rules/generate", {"requirement": "Deny access.", "use_rag": False})
             assert status == 200
-            assert response == {"generated_text": output, "json_valid": False, "rule": None, "retrieved_context": []}
+            assert response == {
+                "generated_text": output, "json_valid": False, "rule": None, "retrieved_context": [],
+                "schema_valid": False, "validation_errors": [{"path": "$", "message": "Generated output is not valid JSON."}],
+            }
 
     asyncio.run(check())
 

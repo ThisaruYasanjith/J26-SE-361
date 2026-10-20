@@ -10,13 +10,12 @@ from typing import Protocol
 
 from pydantic import JsonValue, field_validator
 
-from app.config import RULES_DIRECTORY
 from app.models import ArchitectureModel, NonEmptyString
 from app.rag import ArchitectureRetriever, RetrievedDocument
+from app.rule_validator import RULE_SCHEMA_PATH, RuleValidationIssue, RuleValidationSetupError, RuleValidator
 
 
 DEFAULT_MODEL_ID = "Qwen/Qwen3-4B-Instruct-2507"
-RULE_SCHEMA_PATH = RULES_DIRECTORY.parent / "schemas" / "rule.schema.json"
 
 
 class InferenceError(RuntimeError):
@@ -40,6 +39,8 @@ class RuleGenerationRequest(ArchitectureModel):
 class RuleGenerationResponse(ArchitectureModel):
     generated_text: str
     json_valid: bool
+    schema_valid: bool
+    validation_errors: list[RuleValidationIssue]
     rule: JsonValue = None
     retrieved_context: list[RetrievedDocument]
 
@@ -66,7 +67,7 @@ def parse_model_output(text: str) -> tuple[JsonValue, bool]:
         return number
 
     try:
-        # Syntax is checked here; matching the architecture schema is a later step.
+        # Keep JSON syntax parsing separate from deterministic rule validation.
         return json.loads(clean_json_output(text), parse_constant=reject_constant, parse_float=finite_float), True
     except (ValueError, RecursionError):
         return None, False
@@ -183,11 +184,13 @@ class QwenModelService:
 
 class RuleGenerationService:
     def __init__(self, retriever: ArchitectureRetriever, model: RuleModelBackend,
-                 top_k: int = 8, prompt_builder: RulePromptBuilder | None = None) -> None:
+                 top_k: int = 8, prompt_builder: RulePromptBuilder | None = None,
+                 rule_validator: RuleValidator | None = None) -> None:
         self.retriever = retriever
         self.model = model
         self.top_k = top_k
         self.prompt_builder = prompt_builder if prompt_builder is not None else RulePromptBuilder()
+        self.rule_validator = rule_validator if rule_validator is not None else RuleValidator()
 
     def generate(self, request: RuleGenerationRequest) -> RuleGenerationResponse:
         # The existing retriever builds its index automatically on the first retrieval.
@@ -197,6 +200,16 @@ class RuleGenerationService:
         if not isinstance(text, str):
             raise InferenceError("Base model returned an invalid non-text output.", 502)
         parsed_json, json_valid = parse_model_output(text)
+        if json_valid:
+            try:
+                validation = self.rule_validator.validate(parsed_json)
+            except RuleValidationSetupError as error:
+                raise InferenceError(str(error)) from error
+            schema_valid, validation_errors = validation.valid, validation.errors
+        else:
+            schema_valid = False
+            validation_errors = [RuleValidationIssue(path="$", message="Generated output is not valid JSON.")]
         return RuleGenerationResponse(
             generated_text=text, json_valid=json_valid, rule=parsed_json, retrieved_context=context,
+            schema_valid=schema_valid, validation_errors=validation_errors,
         )
