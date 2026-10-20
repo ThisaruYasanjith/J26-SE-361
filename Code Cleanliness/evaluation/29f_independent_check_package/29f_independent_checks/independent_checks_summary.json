@@ -1,0 +1,9 @@
+{
+  "generated_utc": "2026-10-19T10:54:38.658047+00:00",
+  "source_zip": "analyzer.zip",
+  "findings_processed": 44,
+  "method_metric_predictions": 32,
+  "lexical_proxy_disagreements": 16,
+  "candidate_missing_concerns": 10,
+  "research_limitation": "ALL labels remain UNREVIEWED. Lexical proxies are screening signals, NOT independent gold labels. No precision, recall or F1 claimed."
+}
