@@ -1,0 +1,40 @@
+{
+  "evaluation": "MLCQ sample-level majority vote provisional labels; exact source commit and annotated line interval",
+  "warnings": [
+    "Line-overlap matching is approximate if annotation is not exactly AST element extent. Check matching manually before treating metrics as final.",
+    "Blob annotation is assessed only against GOD_CLASS. It is not identical to LARGE_CLASS; no unsupported mapping was made.",
+    "A parser failure must be resolved before scoring negatives. Confirm parsed_files equals staged file count.",
+    "Balanced purposive sample is not representative of population prevalence."
+  ],
+  "analyzer_files": {
+    "total": 72,
+    "parsed": 71,
+    "failed": 1
+  },
+  "by_smell": {
+    "long method": {
+      "n": 36,
+      "TP": 8,
+      "FP": 0,
+      "FN": 9,
+      "TN": 19,
+      "precision": 1.0,
+      "recall": 0.4706,
+      "f1": 0.64,
+      "accuracy": 0.75,
+      "mcc": 0.5651
+    },
+    "blob": {
+      "n": 36,
+      "TP": 0,
+      "FP": 0,
+      "FN": 17,
+      "TN": 19,
+      "precision": null,
+      "recall": 0.0,
+      "f1": 0.0,
+      "accuracy": 0.5278,
+      "mcc": null
+    }
+  }
+}
