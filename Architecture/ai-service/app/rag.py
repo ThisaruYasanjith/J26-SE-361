@@ -258,6 +258,11 @@ class ArchitectureRetriever:
     def is_indexed(self) -> bool:
         return self._snapshot is not None
 
+    def invalidate_index(self) -> None:
+        with self._lock:
+            # The next retrieval rebuilds from disk; approval itself needs no embeddings or model load.
+            self._snapshot = None
+
     def _context(self) -> ProjectContext:
         context = self.loader.get_context()
         if context is None:

@@ -8,6 +8,14 @@ from fastapi.responses import JSONResponse
 
 from app.config import ServiceConfig
 from app.context_loader import ContextLoadError, ProjectContextLoader
+from app.conflict_detector import ConflictResult
+from app.custom_rule_store import (
+    CustomRuleStore,
+    CustomRuleStoreError,
+    RuleApprovalRequest,
+    RuleApprovalResponse,
+    RuleCheckRequest,
+)
 from app.inference import (
     InferenceError,
     ModelStatus,
@@ -43,6 +51,7 @@ def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBacken
     )
     base_model = model if model is not None else QwenModelService(settings.model_id, settings.model_max_new_tokens)
     generator = RuleGenerationService(retriever, base_model, settings.rag_top_k)
+    custom_rules = CustomRuleStore(settings.custom_rules_path, on_change=retriever.invalidate_index)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -59,6 +68,16 @@ def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBacken
     application.state.context_loader = loader
     application.state.rag_retriever = retriever
     application.state.rule_generator = generator
+    application.state.custom_rule_store = custom_rules
+
+    @application.exception_handler(CustomRuleStoreError)
+    async def custom_rule_error(request: Request, error: CustomRuleStoreError) -> JSONResponse:
+        content = {"detail": str(error)}
+        if error.validation_errors is not None:
+            content["validation_errors"] = [issue.model_dump() for issue in error.validation_errors]
+        if error.conflict_result is not None:
+            content.update(error.conflict_result.model_dump())
+        return JSONResponse(status_code=error.status_code, content=content)
 
     @application.exception_handler(InferenceError)
     async def inference_error(request: Request, error: InferenceError) -> JSONResponse:
@@ -100,6 +119,14 @@ def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBacken
     @application.post("/rules/generate", response_model=RuleGenerationResponse)
     def generate_rule(request: RuleGenerationRequest) -> RuleGenerationResponse:
         return generator.generate(request)
+
+    @application.post("/rules/check-conflicts", response_model=ConflictResult)
+    def check_rule_conflicts(request: RuleCheckRequest) -> ConflictResult:
+        return custom_rules.check_conflicts(request.rule)
+
+    @application.post("/rules/approve", response_model=RuleApprovalResponse)
+    def approve_rule(request: RuleApprovalRequest) -> RuleApprovalResponse:
+        return custom_rules.approve_rule(request.rule, confirm_conflicts=request.confirm_conflicts)
 
     return application
 

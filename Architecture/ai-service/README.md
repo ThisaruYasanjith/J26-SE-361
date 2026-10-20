@@ -44,7 +44,7 @@ Additional configuration:
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` |
 | `EMBEDDING_CACHE_DIR` | Sentence Transformers' default cache |
 
-Custom rules use `{"rules": [...]}` with the same stored rule envelope as base rules. The file starts empty. Stored `VALID` entries are included; entries marked `is_exception: true` or `rule_type: EXCEPTION` become exception documents. This collection is for already-approved stored rules; the service does not approve or evaluate them.
+Custom rules use `{"rules": [...]}` with the same stored rule envelope as base rules. The file starts empty. Stored `VALID` entries are included; entries marked `is_exception: true` or `rule_type: EXCEPTION` become exception documents. The approval endpoints below validate and persist approved rules to this collection.
 
 All returned scores are cosine-style similarities from normalized embeddings. The retriever follows the [BGE model card](https://huggingface.co/BAAI/bge-small-en-v1.5) by adding its retrieval instruction to queries only. The same retriever can be used by later base-model and adapter-backed inference code.
 
@@ -95,3 +95,37 @@ Remove-Item Env:RUN_QWEN_INTEGRATION
 ```
 
 The test runs the three research requirements against real embeddings and FAISS, then Qwen if CUDA is available. It saves the retrieved documents, untouched model output, parsed JSON, syntax validity and load/generation timings to the ignored `.tools/base-qwen-rag-results.json`. Without CUDA it still saves real retrieval results and records Qwen generation as skipped; output and timing fields remain null. Normal `pytest` runs skip this test and mock inference in the unit tests.
+
+## Custom rule approval and conflicts
+
+`POST /rules/check-conflicts` and `POST /rules/approve` accept the parsed rule envelope from the generation response's `rule` field. Send that entire envelope, including `status`, its nested `rule`, and `reason_code`; do not send the full HTTP generation response. Both endpoints require a schema-valid `VALID` envelope and validate it again independently of any caller-supplied validation flags.
+
+```json
+{
+  "rule": {
+    "status": "VALID",
+    "rule": {
+      "rule_type": "COMPONENT_ACCESS",
+      "source": {"entity_type": "COMPONENT", "name": "PaymentService"},
+      "relationship": "DEPENDS_ON",
+      "target": {"entity_type": "COMPONENT", "name": "PaymentGateway"},
+      "action": "ONLY",
+      "scope": {"type": "PROJECT", "value": null},
+      "is_exception": false
+    },
+    "reason_code": null
+  }
+}
+```
+
+The check endpoint returns `has_conflict`, `duplicate`, and a `conflicts` list containing existing rule IDs and readable reasons. The backend compares exact rule types, entity types and names, relationships, targets and scopes. There is no name normalization, alias inference, layer/package expansion, or LLM involvement.
+
+`ONLY` means its source is the only allowed source for that relationship to the target. A different source with `ALLOW` or `ONLY` conflicts, regardless of which rule was approved first. `ALLOW` and `DENY` conflict for the same source, relationship, target and scope. Other action combinations are not evaluated in this commit. Duplicate detection compares the complete rule body, including scope and `is_exception`, while ignoring envelope IDs. Exception entries retain their flags and can be recognized as exact duplicates; precedence and other conflicts involving exception entries are deferred.
+
+Approval checks the current file again within the write transaction. Conflicts return HTTP 409 with conflict details and leave storage unchanged. Add the top-level boolean `"confirm_conflicts": true` to the approval request to explicitly override. The default is false; it cannot bypass schema validation. No model is loaded by checking or approving rules.
+
+Successful approval returns, for example, `{"approved":true,"rule_id":"CUSTOM_001","conflicts_confirmed":false,"duplicate":false}`. IDs are generated from the highest existing `CUSTOM_` number; caller-supplied IDs are not used for new entries. Approving an exact duplicate returns the existing ID with `duplicate: true`, without writing or requesting confirmation again, including when previously confirmed rules now contradict each other.
+
+The default persistence path is `Architecture/rules/custom-rules.json`; `CUSTOM_RULES_PATH` overrides it. A missing file is treated as an empty store. Existing entries must validate, have unique non-empty IDs, and be `VALID`. Malformed or invalid storage returns HTTP 503 and is not overwritten. Entries are written in deterministic order through a flushed, synced temporary file in the same directory, followed by atomic replacement. A failed write leaves the previous file intact. Thread locks shared by path serialize approvals within one service process; use one writer process for this JSON store. Independent worker processes or external edits require separate coordination.
+
+After a new rule is persisted through the service, its RAG index is invalidated. The next retrieval rebuilds using the same document builder and includes approved custom rules. This keeps approval independent of embedding/model availability. Direct external edits still require `/rag/rebuild`; there is no file watcher. Base-rule conformance, Java violations, exception precedence and VS Code integration remain outside this workflow.
