@@ -1,0 +1,736 @@
+﻿finding_a_id,finding_b_id,concern_a,concern_b,symbol_a,symbol_b,description_a,description_b,source_a,source_b,context_a,context_b,gold_same_issue,reviewer_notes
+C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:295:358:Commander.updateQueue(QueueTask):HIGH_COMPLEXITY,"C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:449:com.iluwatar.commander.Commander.handleSuccessMessageErrorIssue(Order, Order):DUPLICATED_LOGIC:21b06d583120a21d7dc95a2eed3a90bb66d14fe605c017a66cccfe44763d165d",HIGH_COMPLEXITY,DUPLICATED_LOGIC,Commander.updateQueue(QueueTask),"com.iluwatar.commander.Commander.handleSuccessMessageErrorIssue(Order, Order)",Method cyclomatic complexity exceeds the configured preliminary decision boundary.,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,java-design-patterns/commander/Commander.java,java-design-patterns/commander/Commander.java,"283:         var transactionId = paymentService.receiveRequest(order.price);
+284:         order.paid = PaymentStatus.DONE;
+285:         LOG.info(ORDER_ID + "": Payment successful, transaction Id: {}"", order.id, transactionId);
+286:         if (!finalSiteMsgShown) {
+287:           LOG.info(""Payment made successfully, thank you for shopping with us!!"");
+288:           finalSiteMsgShown = true;
+289:         }
+290:         sendSuccessMessage(order);
+291:       }
+292:     };
+293:   }
+294: 
+295:   private void updateQueue(QueueTask qt) {
+296:     if (System.currentTimeMillis() - qt.order.createdTime >= this.queueTime) {
+297:       // since payment time is lesser than queuetime it would have already failed..
+298:       // additional check not needed
+299:       LOG.trace(ORDER_ID + "": Queue time for order over, failed.."", qt.order.id);
+300:       return;
+301:     } else if (qt.taskType.equals(TaskType.PAYMENT) && !qt.order.paid.equals(PaymentStatus.TRYING)
+302:         || qt.taskType.equals(TaskType.MESSAGING)
+303:             && (qt.messageType == 1 && !qt.order.messageSent.equals(MessageSent.NONE_SENT)
+304:                 || qt.order.messageSent.equals(MessageSent.PAYMENT_FAIL)
+305:                 || qt.order.messageSent.equals(MessageSent.PAYMENT_SUCCESSFUL))
+306:         || qt.taskType.equals(TaskType.EMPLOYEE_DB) && qt.order.addedToEmployeeHandle) {
+307:       LOG.trace(ORDER_ID + "": Not queueing task since task already done.."", qt.order.id);","437:                       numOfRetries,
+438:                       retryDuration,
+439:                       e -> DatabaseUnavailableException.class.isAssignableFrom(e.getClass()));
+440:               try {
+441:                 r.perform(list, order);
+442:               } catch (Exception e1) {
+443:                 LOG.error(DEFAULT_EXCEPTION_MESSAGE, e1);
+444:               }
+445:             });
+446:     t.start();
+447:   }
+448: 
+449:   private void handleSuccessMessageErrorIssue(Order order, Order o) {
+450:     if ((o.messageSent.equals(MessageSent.NONE_SENT)
+451:             || o.messageSent.equals(MessageSent.PAYMENT_TRYING))
+452:         && System.currentTimeMillis() - o.createdTime < messageTime) {
+453:       var qt = new QueueTask(order, TaskType.MESSAGING, 2);
+454:       updateQueue(qt);
+455:       LOG.info(
+456:           ORDER_ID
+457:               + "": Error in sending Payment Success message, trying to""
+458:               + "" queue task and add to employee handle.."",
+459:           order.id);
+460:       employeeHandleIssue(order);
+461:     }",,
+C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:295:358:Commander.updateQueue(QueueTask):HIGH_COMPLEXITY,"C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:514:com.iluwatar.commander.Commander.handlePaymentErrorIssue(Order, Order):DUPLICATED_LOGIC:21b06d583120a21d7dc95a2eed3a90bb66d14fe605c017a66cccfe44763d165d",HIGH_COMPLEXITY,DUPLICATED_LOGIC,Commander.updateQueue(QueueTask),"com.iluwatar.commander.Commander.handlePaymentErrorIssue(Order, Order)",Method cyclomatic complexity exceeds the configured preliminary decision boundary.,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,java-design-patterns/commander/Commander.java,java-design-patterns/commander/Commander.java,"283:         var transactionId = paymentService.receiveRequest(order.price);
+284:         order.paid = PaymentStatus.DONE;
+285:         LOG.info(ORDER_ID + "": Payment successful, transaction Id: {}"", order.id, transactionId);
+286:         if (!finalSiteMsgShown) {
+287:           LOG.info(""Payment made successfully, thank you for shopping with us!!"");
+288:           finalSiteMsgShown = true;
+289:         }
+290:         sendSuccessMessage(order);
+291:       }
+292:     };
+293:   }
+294: 
+295:   private void updateQueue(QueueTask qt) {
+296:     if (System.currentTimeMillis() - qt.order.createdTime >= this.queueTime) {
+297:       // since payment time is lesser than queuetime it would have already failed..
+298:       // additional check not needed
+299:       LOG.trace(ORDER_ID + "": Queue time for order over, failed.."", qt.order.id);
+300:       return;
+301:     } else if (qt.taskType.equals(TaskType.PAYMENT) && !qt.order.paid.equals(PaymentStatus.TRYING)
+302:         || qt.taskType.equals(TaskType.MESSAGING)
+303:             && (qt.messageType == 1 && !qt.order.messageSent.equals(MessageSent.NONE_SENT)
+304:                 || qt.order.messageSent.equals(MessageSent.PAYMENT_FAIL)
+305:                 || qt.order.messageSent.equals(MessageSent.PAYMENT_SUCCESSFUL))
+306:         || qt.taskType.equals(TaskType.EMPLOYEE_DB) && qt.order.addedToEmployeeHandle) {
+307:       LOG.trace(ORDER_ID + "": Not queueing task since task already done.."", qt.order.id);","502:                       numOfRetries,
+503:                       retryDuration,
+504:                       e -> DatabaseUnavailableException.class.isAssignableFrom(e.getClass()));
+505:               try {
+506:                 r.perform(list, order);
+507:               } catch (Exception e1) {
+508:                 LOG.error(DEFAULT_EXCEPTION_MESSAGE, e1);
+509:               }
+510:             });
+511:     t.start();
+512:   }
+513: 
+514:   private void handlePaymentErrorIssue(Order order, Order o) {
+515:     if ((o.messageSent.equals(MessageSent.NONE_SENT)
+516:             || o.messageSent.equals(MessageSent.PAYMENT_TRYING))
+517:         && System.currentTimeMillis() - o.createdTime < messageTime) {
+518:       var qt = new QueueTask(order, TaskType.MESSAGING, 0);
+519:       updateQueue(qt);
+520:       LOG.warn(
+521:           ORDER_ID
+522:               + "": Error in sending Payment Failure message, ""
+523:               + ""trying to queue task and add to employee handle.."",
+524:           order.id);
+525:       employeeHandleIssue(o);
+526:     }",,
+C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:295:358:Commander.updateQueue(QueueTask):HIGH_COMPLEXITY,C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:73:746:com.iluwatar.commander.Commander:LARGE_CLASS,HIGH_COMPLEXITY,LARGE_CLASS,Commander.updateQueue(QueueTask),com.iluwatar.commander.Commander,Method cyclomatic complexity exceeds the configured preliminary decision boundary.,Class exceeds at least one configured preliminary class-size boundary.,java-design-patterns/commander/Commander.java,java-design-patterns/commander/Commander.java,"283:         var transactionId = paymentService.receiveRequest(order.price);
+284:         order.paid = PaymentStatus.DONE;
+285:         LOG.info(ORDER_ID + "": Payment successful, transaction Id: {}"", order.id, transactionId);
+286:         if (!finalSiteMsgShown) {
+287:           LOG.info(""Payment made successfully, thank you for shopping with us!!"");
+288:           finalSiteMsgShown = true;
+289:         }
+290:         sendSuccessMessage(order);
+291:       }
+292:     };
+293:   }
+294: 
+295:   private void updateQueue(QueueTask qt) {
+296:     if (System.currentTimeMillis() - qt.order.createdTime >= this.queueTime) {
+297:       // since payment time is lesser than queuetime it would have already failed..
+298:       // additional check not needed
+299:       LOG.trace(ORDER_ID + "": Queue time for order over, failed.."", qt.order.id);
+300:       return;
+301:     } else if (qt.taskType.equals(TaskType.PAYMENT) && !qt.order.paid.equals(PaymentStatus.TRYING)
+302:         || qt.taskType.equals(TaskType.MESSAGING)
+303:             && (qt.messageType == 1 && !qt.order.messageSent.equals(MessageSent.NONE_SENT)
+304:                 || qt.order.messageSent.equals(MessageSent.PAYMENT_FAIL)
+305:                 || qt.order.messageSent.equals(MessageSent.PAYMENT_SUCCESSFUL))
+306:         || qt.taskType.equals(TaskType.EMPLOYEE_DB) && qt.order.addedToEmployeeHandle) {
+307:       LOG.trace(ORDER_ID + "": Not queueing task since task already done.."", qt.order.id);","61:  * which everything fails, an individual would have to step in to figure out how to solve the issue.
+62:  *
+63:  * <p>We have abstract classes {@link Database} and {@link Service} which are extended by all the
+64:  * databases and services. Each service has a database to be updated, and receives request from an
+65:  * outside user (the {@link Commander} class here). There are 5 microservices - {@link
+66:  * ShippingService}, {@link PaymentService}, {@link MessagingService}, {@link EmployeeHandle} and a
+67:  * {@link QueueDatabase}. We use retries to execute any instruction using {@link Retry} class, and
+68:  * idempotence is ensured by going through some checks before making requests to services and making
+69:  * change in {@link Order} class fields if request succeeds or definitively fails. There is a single
+70:  * class {@link AppAllCases} that looks at the different scenarios that may be encountered during
+71:  * the placing of an order, including both success and failure cases for each service.
+72:  */
+73: public class Commander {
+74: 
+75:   private final QueueDatabase queue;
+76:   private final EmployeeHandle employeeDb;
+77:   private final PaymentService paymentService;
+78:   private final ShippingService shippingService;
+79:   private final MessagingService messagingService;
+80:   private int queueItems =
+81:       0; // keeping track here only so don't need access to queue db to get this
+82:   private final int numOfRetries;
+83:   private final long retryDuration;
+84:   private final long queueTime;
+85:   private final long queueTaskTime;",,
+C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:295:358:Commander.updateQueue(QueueTask):HIGH_COMPLEXITY,C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\caching\CacheStore.java:188:com.iluwatar.caching.CacheStore.get(String):DUPLICATED_LOGIC:209d94c5791f309c15445c1101e232d1dcafdbb8c1c81a1688e0431f0c2fa375,HIGH_COMPLEXITY,DUPLICATED_LOGIC,Commander.updateQueue(QueueTask),com.iluwatar.caching.CacheStore.get(String),Method cyclomatic complexity exceeds the configured preliminary decision boundary.,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,java-design-patterns/commander/Commander.java,java-design-patterns/caching/CacheStore.java,"283:         var transactionId = paymentService.receiveRequest(order.price);
+284:         order.paid = PaymentStatus.DONE;
+285:         LOG.info(ORDER_ID + "": Payment successful, transaction Id: {}"", order.id, transactionId);
+286:         if (!finalSiteMsgShown) {
+287:           LOG.info(""Payment made successfully, thank you for shopping with us!!"");
+288:           finalSiteMsgShown = true;
+289:         }
+290:         sendSuccessMessage(order);
+291:       }
+292:     };
+293:   }
+294: 
+295:   private void updateQueue(QueueTask qt) {
+296:     if (System.currentTimeMillis() - qt.order.createdTime >= this.queueTime) {
+297:       // since payment time is lesser than queuetime it would have already failed..
+298:       // additional check not needed
+299:       LOG.trace(ORDER_ID + "": Queue time for order over, failed.."", qt.order.id);
+300:       return;
+301:     } else if (qt.taskType.equals(TaskType.PAYMENT) && !qt.order.paid.equals(PaymentStatus.TRYING)
+302:         || qt.taskType.equals(TaskType.MESSAGING)
+303:             && (qt.messageType == 1 && !qt.order.messageSent.equals(MessageSent.NONE_SENT)
+304:                 || qt.order.messageSent.equals(MessageSent.PAYMENT_FAIL)
+305:                 || qt.order.messageSent.equals(MessageSent.PAYMENT_SUCCESSFUL))
+306:         || qt.taskType.equals(TaskType.EMPLOYEE_DB) && qt.order.addedToEmployeeHandle) {
+307:       LOG.trace(ORDER_ID + "": Not queueing task since task already done.."", qt.order.id);","176:         .orElse(List.of())
+177:         .stream()
+178:         .map(userAccount -> userAccount.toString() + ""\n"")
+179:         .collect(Collectors.joining("""", ""\n--CACHE CONTENT--\n"", ""----""));
+180:   }
+181: 
+182:   /**
+183:    * Delegate to backing cache store.
+184:    *
+185:    * @param userId {@link String}
+186:    * @return {@link UserAccount}
+187:    */
+188:   public UserAccount get(final String userId) {
+189:     return cache.get(userId);
+190:   }
+191: 
+192:   /**
+193:    * Delegate to backing cache store.
+194:    *
+195:    * @param userId {@link String}
+196:    * @param userAccount {@link UserAccount}
+197:    */
+198:   public void set(final String userId, final UserAccount userAccount) {
+199:     cache.set(userId, userAccount);
+200:   }",,
+C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:295:358:Commander.updateQueue(QueueTask):HIGH_COMPLEXITY,C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\caching\LruCache.java:172:com.iluwatar.caching.LruCache.contains(String):DUPLICATED_LOGIC:209d94c5791f309c15445c1101e232d1dcafdbb8c1c81a1688e0431f0c2fa375,HIGH_COMPLEXITY,DUPLICATED_LOGIC,Commander.updateQueue(QueueTask),com.iluwatar.caching.LruCache.contains(String),Method cyclomatic complexity exceeds the configured preliminary decision boundary.,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,java-design-patterns/commander/Commander.java,java-design-patterns/caching/LruCache.java,"283:         var transactionId = paymentService.receiveRequest(order.price);
+284:         order.paid = PaymentStatus.DONE;
+285:         LOG.info(ORDER_ID + "": Payment successful, transaction Id: {}"", order.id, transactionId);
+286:         if (!finalSiteMsgShown) {
+287:           LOG.info(""Payment made successfully, thank you for shopping with us!!"");
+288:           finalSiteMsgShown = true;
+289:         }
+290:         sendSuccessMessage(order);
+291:       }
+292:     };
+293:   }
+294: 
+295:   private void updateQueue(QueueTask qt) {
+296:     if (System.currentTimeMillis() - qt.order.createdTime >= this.queueTime) {
+297:       // since payment time is lesser than queuetime it would have already failed..
+298:       // additional check not needed
+299:       LOG.trace(ORDER_ID + "": Queue time for order over, failed.."", qt.order.id);
+300:       return;
+301:     } else if (qt.taskType.equals(TaskType.PAYMENT) && !qt.order.paid.equals(PaymentStatus.TRYING)
+302:         || qt.taskType.equals(TaskType.MESSAGING)
+303:             && (qt.messageType == 1 && !qt.order.messageSent.equals(MessageSent.NONE_SENT)
+304:                 || qt.order.messageSent.equals(MessageSent.PAYMENT_FAIL)
+305:                 || qt.order.messageSent.equals(MessageSent.PAYMENT_SUCCESSFUL))
+306:         || qt.taskType.equals(TaskType.EMPLOYEE_DB) && qt.order.addedToEmployeeHandle) {
+307:       LOG.trace(ORDER_ID + "": Not queueing task since task already done.."", qt.order.id);","160:         setHead(newNode);
+161:       }
+162:       cache.put(userId, newNode);
+163:     }
+164:   }
+165: 
+166:   /**
+167:    * Check if Cache contains the userId.
+168:    *
+169:    * @param userId {@link String}
+170:    * @return boolean
+171:    */
+172:   public boolean contains(final String userId) {
+173:     return cache.containsKey(userId);
+174:   }
+175: 
+176:   /**
+177:    * Invalidate cache for user.
+178:    *
+179:    * @param userId {@link String}
+180:    */
+181:   public void invalidate(final String userId) {
+182:     var toBeRemoved = cache.remove(userId);
+183:     if (toBeRemoved != null) {
+184:       LOGGER.info(""# {} has been updated! "" + ""Removing older version from cache..."", userId);",,
+"C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:449:com.iluwatar.commander.Commander.handleSuccessMessageErrorIssue(Order, Order):DUPLICATED_LOGIC:21b06d583120a21d7dc95a2eed3a90bb66d14fe605c017a66cccfe44763d165d","C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:514:com.iluwatar.commander.Commander.handlePaymentErrorIssue(Order, Order):DUPLICATED_LOGIC:21b06d583120a21d7dc95a2eed3a90bb66d14fe605c017a66cccfe44763d165d",DUPLICATED_LOGIC,DUPLICATED_LOGIC,"com.iluwatar.commander.Commander.handleSuccessMessageErrorIssue(Order, Order)","com.iluwatar.commander.Commander.handlePaymentErrorIssue(Order, Order)",This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,java-design-patterns/commander/Commander.java,java-design-patterns/commander/Commander.java,"437:                       numOfRetries,
+438:                       retryDuration,
+439:                       e -> DatabaseUnavailableException.class.isAssignableFrom(e.getClass()));
+440:               try {
+441:                 r.perform(list, order);
+442:               } catch (Exception e1) {
+443:                 LOG.error(DEFAULT_EXCEPTION_MESSAGE, e1);
+444:               }
+445:             });
+446:     t.start();
+447:   }
+448: 
+449:   private void handleSuccessMessageErrorIssue(Order order, Order o) {
+450:     if ((o.messageSent.equals(MessageSent.NONE_SENT)
+451:             || o.messageSent.equals(MessageSent.PAYMENT_TRYING))
+452:         && System.currentTimeMillis() - o.createdTime < messageTime) {
+453:       var qt = new QueueTask(order, TaskType.MESSAGING, 2);
+454:       updateQueue(qt);
+455:       LOG.info(
+456:           ORDER_ID
+457:               + "": Error in sending Payment Success message, trying to""
+458:               + "" queue task and add to employee handle.."",
+459:           order.id);
+460:       employeeHandleIssue(order);
+461:     }","502:                       numOfRetries,
+503:                       retryDuration,
+504:                       e -> DatabaseUnavailableException.class.isAssignableFrom(e.getClass()));
+505:               try {
+506:                 r.perform(list, order);
+507:               } catch (Exception e1) {
+508:                 LOG.error(DEFAULT_EXCEPTION_MESSAGE, e1);
+509:               }
+510:             });
+511:     t.start();
+512:   }
+513: 
+514:   private void handlePaymentErrorIssue(Order order, Order o) {
+515:     if ((o.messageSent.equals(MessageSent.NONE_SENT)
+516:             || o.messageSent.equals(MessageSent.PAYMENT_TRYING))
+517:         && System.currentTimeMillis() - o.createdTime < messageTime) {
+518:       var qt = new QueueTask(order, TaskType.MESSAGING, 0);
+519:       updateQueue(qt);
+520:       LOG.warn(
+521:           ORDER_ID
+522:               + "": Error in sending Payment Failure message, ""
+523:               + ""trying to queue task and add to employee handle.."",
+524:           order.id);
+525:       employeeHandleIssue(o);
+526:     }",,
+"C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:449:com.iluwatar.commander.Commander.handleSuccessMessageErrorIssue(Order, Order):DUPLICATED_LOGIC:21b06d583120a21d7dc95a2eed3a90bb66d14fe605c017a66cccfe44763d165d",C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:73:746:com.iluwatar.commander.Commander:LARGE_CLASS,DUPLICATED_LOGIC,LARGE_CLASS,"com.iluwatar.commander.Commander.handleSuccessMessageErrorIssue(Order, Order)",com.iluwatar.commander.Commander,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,Class exceeds at least one configured preliminary class-size boundary.,java-design-patterns/commander/Commander.java,java-design-patterns/commander/Commander.java,"437:                       numOfRetries,
+438:                       retryDuration,
+439:                       e -> DatabaseUnavailableException.class.isAssignableFrom(e.getClass()));
+440:               try {
+441:                 r.perform(list, order);
+442:               } catch (Exception e1) {
+443:                 LOG.error(DEFAULT_EXCEPTION_MESSAGE, e1);
+444:               }
+445:             });
+446:     t.start();
+447:   }
+448: 
+449:   private void handleSuccessMessageErrorIssue(Order order, Order o) {
+450:     if ((o.messageSent.equals(MessageSent.NONE_SENT)
+451:             || o.messageSent.equals(MessageSent.PAYMENT_TRYING))
+452:         && System.currentTimeMillis() - o.createdTime < messageTime) {
+453:       var qt = new QueueTask(order, TaskType.MESSAGING, 2);
+454:       updateQueue(qt);
+455:       LOG.info(
+456:           ORDER_ID
+457:               + "": Error in sending Payment Success message, trying to""
+458:               + "" queue task and add to employee handle.."",
+459:           order.id);
+460:       employeeHandleIssue(order);
+461:     }","61:  * which everything fails, an individual would have to step in to figure out how to solve the issue.
+62:  *
+63:  * <p>We have abstract classes {@link Database} and {@link Service} which are extended by all the
+64:  * databases and services. Each service has a database to be updated, and receives request from an
+65:  * outside user (the {@link Commander} class here). There are 5 microservices - {@link
+66:  * ShippingService}, {@link PaymentService}, {@link MessagingService}, {@link EmployeeHandle} and a
+67:  * {@link QueueDatabase}. We use retries to execute any instruction using {@link Retry} class, and
+68:  * idempotence is ensured by going through some checks before making requests to services and making
+69:  * change in {@link Order} class fields if request succeeds or definitively fails. There is a single
+70:  * class {@link AppAllCases} that looks at the different scenarios that may be encountered during
+71:  * the placing of an order, including both success and failure cases for each service.
+72:  */
+73: public class Commander {
+74: 
+75:   private final QueueDatabase queue;
+76:   private final EmployeeHandle employeeDb;
+77:   private final PaymentService paymentService;
+78:   private final ShippingService shippingService;
+79:   private final MessagingService messagingService;
+80:   private int queueItems =
+81:       0; // keeping track here only so don't need access to queue db to get this
+82:   private final int numOfRetries;
+83:   private final long retryDuration;
+84:   private final long queueTime;
+85:   private final long queueTaskTime;",,
+"C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:449:com.iluwatar.commander.Commander.handleSuccessMessageErrorIssue(Order, Order):DUPLICATED_LOGIC:21b06d583120a21d7dc95a2eed3a90bb66d14fe605c017a66cccfe44763d165d",C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\caching\CacheStore.java:188:com.iluwatar.caching.CacheStore.get(String):DUPLICATED_LOGIC:209d94c5791f309c15445c1101e232d1dcafdbb8c1c81a1688e0431f0c2fa375,DUPLICATED_LOGIC,DUPLICATED_LOGIC,"com.iluwatar.commander.Commander.handleSuccessMessageErrorIssue(Order, Order)",com.iluwatar.caching.CacheStore.get(String),This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,java-design-patterns/commander/Commander.java,java-design-patterns/caching/CacheStore.java,"437:                       numOfRetries,
+438:                       retryDuration,
+439:                       e -> DatabaseUnavailableException.class.isAssignableFrom(e.getClass()));
+440:               try {
+441:                 r.perform(list, order);
+442:               } catch (Exception e1) {
+443:                 LOG.error(DEFAULT_EXCEPTION_MESSAGE, e1);
+444:               }
+445:             });
+446:     t.start();
+447:   }
+448: 
+449:   private void handleSuccessMessageErrorIssue(Order order, Order o) {
+450:     if ((o.messageSent.equals(MessageSent.NONE_SENT)
+451:             || o.messageSent.equals(MessageSent.PAYMENT_TRYING))
+452:         && System.currentTimeMillis() - o.createdTime < messageTime) {
+453:       var qt = new QueueTask(order, TaskType.MESSAGING, 2);
+454:       updateQueue(qt);
+455:       LOG.info(
+456:           ORDER_ID
+457:               + "": Error in sending Payment Success message, trying to""
+458:               + "" queue task and add to employee handle.."",
+459:           order.id);
+460:       employeeHandleIssue(order);
+461:     }","176:         .orElse(List.of())
+177:         .stream()
+178:         .map(userAccount -> userAccount.toString() + ""\n"")
+179:         .collect(Collectors.joining("""", ""\n--CACHE CONTENT--\n"", ""----""));
+180:   }
+181: 
+182:   /**
+183:    * Delegate to backing cache store.
+184:    *
+185:    * @param userId {@link String}
+186:    * @return {@link UserAccount}
+187:    */
+188:   public UserAccount get(final String userId) {
+189:     return cache.get(userId);
+190:   }
+191: 
+192:   /**
+193:    * Delegate to backing cache store.
+194:    *
+195:    * @param userId {@link String}
+196:    * @param userAccount {@link UserAccount}
+197:    */
+198:   public void set(final String userId, final UserAccount userAccount) {
+199:     cache.set(userId, userAccount);
+200:   }",,
+"C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:449:com.iluwatar.commander.Commander.handleSuccessMessageErrorIssue(Order, Order):DUPLICATED_LOGIC:21b06d583120a21d7dc95a2eed3a90bb66d14fe605c017a66cccfe44763d165d",C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\caching\LruCache.java:172:com.iluwatar.caching.LruCache.contains(String):DUPLICATED_LOGIC:209d94c5791f309c15445c1101e232d1dcafdbb8c1c81a1688e0431f0c2fa375,DUPLICATED_LOGIC,DUPLICATED_LOGIC,"com.iluwatar.commander.Commander.handleSuccessMessageErrorIssue(Order, Order)",com.iluwatar.caching.LruCache.contains(String),This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,java-design-patterns/commander/Commander.java,java-design-patterns/caching/LruCache.java,"437:                       numOfRetries,
+438:                       retryDuration,
+439:                       e -> DatabaseUnavailableException.class.isAssignableFrom(e.getClass()));
+440:               try {
+441:                 r.perform(list, order);
+442:               } catch (Exception e1) {
+443:                 LOG.error(DEFAULT_EXCEPTION_MESSAGE, e1);
+444:               }
+445:             });
+446:     t.start();
+447:   }
+448: 
+449:   private void handleSuccessMessageErrorIssue(Order order, Order o) {
+450:     if ((o.messageSent.equals(MessageSent.NONE_SENT)
+451:             || o.messageSent.equals(MessageSent.PAYMENT_TRYING))
+452:         && System.currentTimeMillis() - o.createdTime < messageTime) {
+453:       var qt = new QueueTask(order, TaskType.MESSAGING, 2);
+454:       updateQueue(qt);
+455:       LOG.info(
+456:           ORDER_ID
+457:               + "": Error in sending Payment Success message, trying to""
+458:               + "" queue task and add to employee handle.."",
+459:           order.id);
+460:       employeeHandleIssue(order);
+461:     }","160:         setHead(newNode);
+161:       }
+162:       cache.put(userId, newNode);
+163:     }
+164:   }
+165: 
+166:   /**
+167:    * Check if Cache contains the userId.
+168:    *
+169:    * @param userId {@link String}
+170:    * @return boolean
+171:    */
+172:   public boolean contains(final String userId) {
+173:     return cache.containsKey(userId);
+174:   }
+175: 
+176:   /**
+177:    * Invalidate cache for user.
+178:    *
+179:    * @param userId {@link String}
+180:    */
+181:   public void invalidate(final String userId) {
+182:     var toBeRemoved = cache.remove(userId);
+183:     if (toBeRemoved != null) {
+184:       LOGGER.info(""# {} has been updated! "" + ""Removing older version from cache..."", userId);",,
+"C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:514:com.iluwatar.commander.Commander.handlePaymentErrorIssue(Order, Order):DUPLICATED_LOGIC:21b06d583120a21d7dc95a2eed3a90bb66d14fe605c017a66cccfe44763d165d",C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:73:746:com.iluwatar.commander.Commander:LARGE_CLASS,DUPLICATED_LOGIC,LARGE_CLASS,"com.iluwatar.commander.Commander.handlePaymentErrorIssue(Order, Order)",com.iluwatar.commander.Commander,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,Class exceeds at least one configured preliminary class-size boundary.,java-design-patterns/commander/Commander.java,java-design-patterns/commander/Commander.java,"502:                       numOfRetries,
+503:                       retryDuration,
+504:                       e -> DatabaseUnavailableException.class.isAssignableFrom(e.getClass()));
+505:               try {
+506:                 r.perform(list, order);
+507:               } catch (Exception e1) {
+508:                 LOG.error(DEFAULT_EXCEPTION_MESSAGE, e1);
+509:               }
+510:             });
+511:     t.start();
+512:   }
+513: 
+514:   private void handlePaymentErrorIssue(Order order, Order o) {
+515:     if ((o.messageSent.equals(MessageSent.NONE_SENT)
+516:             || o.messageSent.equals(MessageSent.PAYMENT_TRYING))
+517:         && System.currentTimeMillis() - o.createdTime < messageTime) {
+518:       var qt = new QueueTask(order, TaskType.MESSAGING, 0);
+519:       updateQueue(qt);
+520:       LOG.warn(
+521:           ORDER_ID
+522:               + "": Error in sending Payment Failure message, ""
+523:               + ""trying to queue task and add to employee handle.."",
+524:           order.id);
+525:       employeeHandleIssue(o);
+526:     }","61:  * which everything fails, an individual would have to step in to figure out how to solve the issue.
+62:  *
+63:  * <p>We have abstract classes {@link Database} and {@link Service} which are extended by all the
+64:  * databases and services. Each service has a database to be updated, and receives request from an
+65:  * outside user (the {@link Commander} class here). There are 5 microservices - {@link
+66:  * ShippingService}, {@link PaymentService}, {@link MessagingService}, {@link EmployeeHandle} and a
+67:  * {@link QueueDatabase}. We use retries to execute any instruction using {@link Retry} class, and
+68:  * idempotence is ensured by going through some checks before making requests to services and making
+69:  * change in {@link Order} class fields if request succeeds or definitively fails. There is a single
+70:  * class {@link AppAllCases} that looks at the different scenarios that may be encountered during
+71:  * the placing of an order, including both success and failure cases for each service.
+72:  */
+73: public class Commander {
+74: 
+75:   private final QueueDatabase queue;
+76:   private final EmployeeHandle employeeDb;
+77:   private final PaymentService paymentService;
+78:   private final ShippingService shippingService;
+79:   private final MessagingService messagingService;
+80:   private int queueItems =
+81:       0; // keeping track here only so don't need access to queue db to get this
+82:   private final int numOfRetries;
+83:   private final long retryDuration;
+84:   private final long queueTime;
+85:   private final long queueTaskTime;",,
+"C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:514:com.iluwatar.commander.Commander.handlePaymentErrorIssue(Order, Order):DUPLICATED_LOGIC:21b06d583120a21d7dc95a2eed3a90bb66d14fe605c017a66cccfe44763d165d",C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\caching\CacheStore.java:188:com.iluwatar.caching.CacheStore.get(String):DUPLICATED_LOGIC:209d94c5791f309c15445c1101e232d1dcafdbb8c1c81a1688e0431f0c2fa375,DUPLICATED_LOGIC,DUPLICATED_LOGIC,"com.iluwatar.commander.Commander.handlePaymentErrorIssue(Order, Order)",com.iluwatar.caching.CacheStore.get(String),This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,java-design-patterns/commander/Commander.java,java-design-patterns/caching/CacheStore.java,"502:                       numOfRetries,
+503:                       retryDuration,
+504:                       e -> DatabaseUnavailableException.class.isAssignableFrom(e.getClass()));
+505:               try {
+506:                 r.perform(list, order);
+507:               } catch (Exception e1) {
+508:                 LOG.error(DEFAULT_EXCEPTION_MESSAGE, e1);
+509:               }
+510:             });
+511:     t.start();
+512:   }
+513: 
+514:   private void handlePaymentErrorIssue(Order order, Order o) {
+515:     if ((o.messageSent.equals(MessageSent.NONE_SENT)
+516:             || o.messageSent.equals(MessageSent.PAYMENT_TRYING))
+517:         && System.currentTimeMillis() - o.createdTime < messageTime) {
+518:       var qt = new QueueTask(order, TaskType.MESSAGING, 0);
+519:       updateQueue(qt);
+520:       LOG.warn(
+521:           ORDER_ID
+522:               + "": Error in sending Payment Failure message, ""
+523:               + ""trying to queue task and add to employee handle.."",
+524:           order.id);
+525:       employeeHandleIssue(o);
+526:     }","176:         .orElse(List.of())
+177:         .stream()
+178:         .map(userAccount -> userAccount.toString() + ""\n"")
+179:         .collect(Collectors.joining("""", ""\n--CACHE CONTENT--\n"", ""----""));
+180:   }
+181: 
+182:   /**
+183:    * Delegate to backing cache store.
+184:    *
+185:    * @param userId {@link String}
+186:    * @return {@link UserAccount}
+187:    */
+188:   public UserAccount get(final String userId) {
+189:     return cache.get(userId);
+190:   }
+191: 
+192:   /**
+193:    * Delegate to backing cache store.
+194:    *
+195:    * @param userId {@link String}
+196:    * @param userAccount {@link UserAccount}
+197:    */
+198:   public void set(final String userId, final UserAccount userAccount) {
+199:     cache.set(userId, userAccount);
+200:   }",,
+"C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:514:com.iluwatar.commander.Commander.handlePaymentErrorIssue(Order, Order):DUPLICATED_LOGIC:21b06d583120a21d7dc95a2eed3a90bb66d14fe605c017a66cccfe44763d165d",C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\caching\LruCache.java:172:com.iluwatar.caching.LruCache.contains(String):DUPLICATED_LOGIC:209d94c5791f309c15445c1101e232d1dcafdbb8c1c81a1688e0431f0c2fa375,DUPLICATED_LOGIC,DUPLICATED_LOGIC,"com.iluwatar.commander.Commander.handlePaymentErrorIssue(Order, Order)",com.iluwatar.caching.LruCache.contains(String),This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,java-design-patterns/commander/Commander.java,java-design-patterns/caching/LruCache.java,"502:                       numOfRetries,
+503:                       retryDuration,
+504:                       e -> DatabaseUnavailableException.class.isAssignableFrom(e.getClass()));
+505:               try {
+506:                 r.perform(list, order);
+507:               } catch (Exception e1) {
+508:                 LOG.error(DEFAULT_EXCEPTION_MESSAGE, e1);
+509:               }
+510:             });
+511:     t.start();
+512:   }
+513: 
+514:   private void handlePaymentErrorIssue(Order order, Order o) {
+515:     if ((o.messageSent.equals(MessageSent.NONE_SENT)
+516:             || o.messageSent.equals(MessageSent.PAYMENT_TRYING))
+517:         && System.currentTimeMillis() - o.createdTime < messageTime) {
+518:       var qt = new QueueTask(order, TaskType.MESSAGING, 0);
+519:       updateQueue(qt);
+520:       LOG.warn(
+521:           ORDER_ID
+522:               + "": Error in sending Payment Failure message, ""
+523:               + ""trying to queue task and add to employee handle.."",
+524:           order.id);
+525:       employeeHandleIssue(o);
+526:     }","160:         setHead(newNode);
+161:       }
+162:       cache.put(userId, newNode);
+163:     }
+164:   }
+165: 
+166:   /**
+167:    * Check if Cache contains the userId.
+168:    *
+169:    * @param userId {@link String}
+170:    * @return boolean
+171:    */
+172:   public boolean contains(final String userId) {
+173:     return cache.containsKey(userId);
+174:   }
+175: 
+176:   /**
+177:    * Invalidate cache for user.
+178:    *
+179:    * @param userId {@link String}
+180:    */
+181:   public void invalidate(final String userId) {
+182:     var toBeRemoved = cache.remove(userId);
+183:     if (toBeRemoved != null) {
+184:       LOGGER.info(""# {} has been updated! "" + ""Removing older version from cache..."", userId);",,
+C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:73:746:com.iluwatar.commander.Commander:LARGE_CLASS,C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\caching\CacheStore.java:188:com.iluwatar.caching.CacheStore.get(String):DUPLICATED_LOGIC:209d94c5791f309c15445c1101e232d1dcafdbb8c1c81a1688e0431f0c2fa375,LARGE_CLASS,DUPLICATED_LOGIC,com.iluwatar.commander.Commander,com.iluwatar.caching.CacheStore.get(String),Class exceeds at least one configured preliminary class-size boundary.,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,java-design-patterns/commander/Commander.java,java-design-patterns/caching/CacheStore.java,"61:  * which everything fails, an individual would have to step in to figure out how to solve the issue.
+62:  *
+63:  * <p>We have abstract classes {@link Database} and {@link Service} which are extended by all the
+64:  * databases and services. Each service has a database to be updated, and receives request from an
+65:  * outside user (the {@link Commander} class here). There are 5 microservices - {@link
+66:  * ShippingService}, {@link PaymentService}, {@link MessagingService}, {@link EmployeeHandle} and a
+67:  * {@link QueueDatabase}. We use retries to execute any instruction using {@link Retry} class, and
+68:  * idempotence is ensured by going through some checks before making requests to services and making
+69:  * change in {@link Order} class fields if request succeeds or definitively fails. There is a single
+70:  * class {@link AppAllCases} that looks at the different scenarios that may be encountered during
+71:  * the placing of an order, including both success and failure cases for each service.
+72:  */
+73: public class Commander {
+74: 
+75:   private final QueueDatabase queue;
+76:   private final EmployeeHandle employeeDb;
+77:   private final PaymentService paymentService;
+78:   private final ShippingService shippingService;
+79:   private final MessagingService messagingService;
+80:   private int queueItems =
+81:       0; // keeping track here only so don't need access to queue db to get this
+82:   private final int numOfRetries;
+83:   private final long retryDuration;
+84:   private final long queueTime;
+85:   private final long queueTaskTime;","176:         .orElse(List.of())
+177:         .stream()
+178:         .map(userAccount -> userAccount.toString() + ""\n"")
+179:         .collect(Collectors.joining("""", ""\n--CACHE CONTENT--\n"", ""----""));
+180:   }
+181: 
+182:   /**
+183:    * Delegate to backing cache store.
+184:    *
+185:    * @param userId {@link String}
+186:    * @return {@link UserAccount}
+187:    */
+188:   public UserAccount get(final String userId) {
+189:     return cache.get(userId);
+190:   }
+191: 
+192:   /**
+193:    * Delegate to backing cache store.
+194:    *
+195:    * @param userId {@link String}
+196:    * @param userAccount {@link UserAccount}
+197:    */
+198:   public void set(final String userId, final UserAccount userAccount) {
+199:     cache.set(userId, userAccount);
+200:   }",,
+C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\commander\Commander.java:73:746:com.iluwatar.commander.Commander:LARGE_CLASS,C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\caching\LruCache.java:172:com.iluwatar.caching.LruCache.contains(String):DUPLICATED_LOGIC:209d94c5791f309c15445c1101e232d1dcafdbb8c1c81a1688e0431f0c2fa375,LARGE_CLASS,DUPLICATED_LOGIC,com.iluwatar.commander.Commander,com.iluwatar.caching.LruCache.contains(String),Class exceeds at least one configured preliminary class-size boundary.,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,java-design-patterns/commander/Commander.java,java-design-patterns/caching/LruCache.java,"61:  * which everything fails, an individual would have to step in to figure out how to solve the issue.
+62:  *
+63:  * <p>We have abstract classes {@link Database} and {@link Service} which are extended by all the
+64:  * databases and services. Each service has a database to be updated, and receives request from an
+65:  * outside user (the {@link Commander} class here). There are 5 microservices - {@link
+66:  * ShippingService}, {@link PaymentService}, {@link MessagingService}, {@link EmployeeHandle} and a
+67:  * {@link QueueDatabase}. We use retries to execute any instruction using {@link Retry} class, and
+68:  * idempotence is ensured by going through some checks before making requests to services and making
+69:  * change in {@link Order} class fields if request succeeds or definitively fails. There is a single
+70:  * class {@link AppAllCases} that looks at the different scenarios that may be encountered during
+71:  * the placing of an order, including both success and failure cases for each service.
+72:  */
+73: public class Commander {
+74: 
+75:   private final QueueDatabase queue;
+76:   private final EmployeeHandle employeeDb;
+77:   private final PaymentService paymentService;
+78:   private final ShippingService shippingService;
+79:   private final MessagingService messagingService;
+80:   private int queueItems =
+81:       0; // keeping track here only so don't need access to queue db to get this
+82:   private final int numOfRetries;
+83:   private final long retryDuration;
+84:   private final long queueTime;
+85:   private final long queueTaskTime;","160:         setHead(newNode);
+161:       }
+162:       cache.put(userId, newNode);
+163:     }
+164:   }
+165: 
+166:   /**
+167:    * Check if Cache contains the userId.
+168:    *
+169:    * @param userId {@link String}
+170:    * @return boolean
+171:    */
+172:   public boolean contains(final String userId) {
+173:     return cache.containsKey(userId);
+174:   }
+175: 
+176:   /**
+177:    * Invalidate cache for user.
+178:    *
+179:    * @param userId {@link String}
+180:    */
+181:   public void invalidate(final String userId) {
+182:     var toBeRemoved = cache.remove(userId);
+183:     if (toBeRemoved != null) {
+184:       LOGGER.info(""# {} has been updated! "" + ""Removing older version from cache..."", userId);",,
+C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\caching\CacheStore.java:188:com.iluwatar.caching.CacheStore.get(String):DUPLICATED_LOGIC:209d94c5791f309c15445c1101e232d1dcafdbb8c1c81a1688e0431f0c2fa375,C:\4th Year\Research Work\Prototype\Research-Prototype\src\codeQuality\testData\java-design-patterns\caching\LruCache.java:172:com.iluwatar.caching.LruCache.contains(String):DUPLICATED_LOGIC:209d94c5791f309c15445c1101e232d1dcafdbb8c1c81a1688e0431f0c2fa375,DUPLICATED_LOGIC,DUPLICATED_LOGIC,com.iluwatar.caching.CacheStore.get(String),com.iluwatar.caching.LruCache.contains(String),This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,This method shares an identical normalized body fingerprint with other methods. Manual review is required before recommending refactoring.,java-design-patterns/caching/CacheStore.java,java-design-patterns/caching/LruCache.java,"176:         .orElse(List.of())
+177:         .stream()
+178:         .map(userAccount -> userAccount.toString() + ""\n"")
+179:         .collect(Collectors.joining("""", ""\n--CACHE CONTENT--\n"", ""----""));
+180:   }
+181: 
+182:   /**
+183:    * Delegate to backing cache store.
+184:    *
+185:    * @param userId {@link String}
+186:    * @return {@link UserAccount}
+187:    */
+188:   public UserAccount get(final String userId) {
+189:     return cache.get(userId);
+190:   }
+191: 
+192:   /**
+193:    * Delegate to backing cache store.
+194:    *
+195:    * @param userId {@link String}
+196:    * @param userAccount {@link UserAccount}
+197:    */
+198:   public void set(final String userId, final UserAccount userAccount) {
+199:     cache.set(userId, userAccount);
+200:   }","160:         setHead(newNode);
+161:       }
+162:       cache.put(userId, newNode);
+163:     }
+164:   }
+165: 
+166:   /**
+167:    * Check if Cache contains the userId.
+168:    *
+169:    * @param userId {@link String}
+170:    * @return boolean
+171:    */
+172:   public boolean contains(final String userId) {
+173:     return cache.containsKey(userId);
+174:   }
+175: 
+176:   /**
+177:    * Invalidate cache for user.
+178:    *
+179:    * @param userId {@link String}
+180:    */
+181:   public void invalidate(final String userId) {
+182:     var toBeRemoved = cache.remove(userId);
+183:     if (toBeRemoved != null) {
+184:       LOGGER.info(""# {} has been updated! "" + ""Removing older version from cache..."", userId);",,
