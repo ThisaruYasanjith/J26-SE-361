@@ -1,4 +1,6 @@
 method,accuracy,precision,recall,f1,mcc
 PMD (Static Analysis),0.5072,1.0000,0.1707,0.2917,0.2777
 SpotBugs (Static Analysis),0.4106,1.0000,0.0081,0.0161,0.0576
+Semantic-Only Model (GraphCodeBERT),1.0000,1.0000,1.0000,1.0000,1.0000
+Structural-Only Model (AST),0.9227,0.9820,0.8862,0.9316,0.8492
 Combined Model (GraphCodeBERT + AST),1.0000,1.0000,1.0000,1.0000,1.0000
