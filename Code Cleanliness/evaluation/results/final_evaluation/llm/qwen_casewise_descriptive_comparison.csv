@@ -1,0 +1,7 @@
+case_id,model,concern,generation_seconds,response_words
+CASE_01,base,Long Method / High Complexity,11.82,122
+CASE_01,fine_tuned,Long Method / High Complexity,11.134,103
+CASE_02,base,Duplicated Logic,10.811,124
+CASE_02,fine_tuned,Duplicated Logic,14.949,137
+CASE_03,base,Large Class,10.789,126
+CASE_03,fine_tuned,Large Class,12.505,106

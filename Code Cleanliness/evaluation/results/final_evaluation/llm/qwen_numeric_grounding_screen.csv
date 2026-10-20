@@ -1,0 +1,7 @@
+case_id,model,generation_seconds,evidence_numbers,response_only_numbers,response_only_number_count
+CASE_01,base,11.82,,"13, 14",2
+CASE_01,fine_tuned,11.134,,14,1
+CASE_02,base,10.811,,,0
+CASE_02,fine_tuned,14.949,,,0
+CASE_03,base,10.789,,2000,1
+CASE_03,fine_tuned,12.505,,,0

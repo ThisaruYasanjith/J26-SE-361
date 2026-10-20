@@ -1,0 +1,5 @@
+test,observations,result,interpretation
+Ranking score discrimination,40,1 distinct scores; 40 at 1.0,"Descriptive saturation audit, not priority accuracy"
+Ranking score-order consistency,40,0 adjacent score-order inversions,Diagnostic only; ranking may use additional tie-breakers
+Grouping internal consistency,15,0 contradictory pairs; 0 transitivity violations,"Structural consistency, not grouping accuracy"
+Qwen numeric-grounding screening,6,4 response-only numeric references,Candidates for unsupported claims; not verified hallucinations
