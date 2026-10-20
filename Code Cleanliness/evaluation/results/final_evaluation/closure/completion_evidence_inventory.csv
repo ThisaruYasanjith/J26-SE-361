@@ -1,0 +1,5 @@
+area,status,evidence
+Ranking,DESCRIPTIVE_ONLY,40 top-selected groups; 40 valid scores; 40 scores at 1.0; 29 heuristic possible generated-code groups; 0 independently labeled ranks
+Grouping,DESCRIPTIVE_ONLY,"15 pairs; system says related 7, unrelated 8; independent label availability {}"
+Qwen,DESCRIPTIVE_ONLY,"6 controlled outputs; 0 quality-rated rows; base: n=3, mean latency=11.14s, mean response length=124.00 words, response-only numeric references=3; fine_tuned: n=3, mean latency=12.86s, mean response length=115.33 words, response-only numeric references=1"
+Reproducibility files,CHECKED,29f_reproducible_evaluation.ipynb=present; 29f_grouping_validation.ipynb=present; 29f_ranking_validation.ipynb=present; 29f_llm_quality_validation.ipynb=present; FINAL_EVALUATION_SUMMARY.md=present; 29F_FINAL_EVALUATION_COMPLETION_REPORT.md=present

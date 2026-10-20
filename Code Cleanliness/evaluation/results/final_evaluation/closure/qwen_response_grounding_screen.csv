@@ -1,0 +1,7 @@
+case_id,model,generation_seconds,response_words,response_only_numeric_tokens,numeric_screen_flags,meaning
+CASE_01,base,11.82,122,13|14,2,Requires examination; not proof of hallucination
+CASE_01,fine_tuned,11.134,103,14,1,Requires examination; not proof of hallucination
+CASE_02,base,10.811,124,,0,Requires examination; not proof of hallucination
+CASE_02,fine_tuned,14.949,137,,0,Requires examination; not proof of hallucination
+CASE_03,base,10.789,126,2000,1,Requires examination; not proof of hallucination
+CASE_03,fine_tuned,12.505,106,,0,Requires examination; not proof of hallucination
