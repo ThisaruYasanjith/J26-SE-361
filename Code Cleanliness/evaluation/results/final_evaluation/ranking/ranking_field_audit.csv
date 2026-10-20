@@ -1,0 +1,8 @@
+field,nonempty,distinct
+group_id,40,40
+analyzer_rank,40,40
+exceedance_score,40,1
+concerns,40,3
+affected_files,40,1
+findings,40,17
+independent_priority_rank,0,0

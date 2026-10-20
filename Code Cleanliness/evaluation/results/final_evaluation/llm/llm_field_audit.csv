@@ -1,0 +1,13 @@
+field,nonempty,distinct
+case_id,6,3
+case_type,6,1
+model,6,2
+concern,6,3
+evidence,6,3
+response,6,6
+generation_seconds,6,6
+correctness_1_to_5,0,0
+relevance_1_to_5,0,0
+actionability_1_to_5,0,0
+grounding_1_to_5,0,0
+unsupported_claims_count,0,0
