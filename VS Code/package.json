@@ -14,6 +14,16 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "Architecture Governance",
+      "properties": {
+        "architectureGovernance.aiBackendUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000",
+          "description": "FastAPI architecture AI backend base URL. Use a local service or a remote HTTPS service."
+        }
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -62,7 +72,8 @@
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "test:architecture": "npm run compile-tests && node --test out/test/architecture/backendClient.unit.js out/test/architecture/ruleWorkflow.unit.js out/test/architecture/architectureView.unit.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.134.0",

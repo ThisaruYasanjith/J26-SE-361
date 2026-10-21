@@ -6,6 +6,8 @@ import { BehaviouralPanel } from "./behavioural/behaviouralPanel";
 import { RuntimePanel } from "./runtime/runtimePanel";
 
 export function activate(context: vscode.ExtensionContext) {
+  const architectureOutput = vscode.window.createOutputChannel("Architecture Governance");
+  context.subscriptions.push(architectureOutput);
   // Register sidebar buttons view
   vscode.window.registerTreeDataProvider(
     "analyzer.dashboardView",
@@ -15,7 +17,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Register commands to open each full window panel
   context.subscriptions.push(
     vscode.commands.registerCommand("analyzer.openArchitecture", () => {
-      ArchitecturePanel.show(context);
+      ArchitecturePanel.show(context, architectureOutput);
     }),
     vscode.commands.registerCommand("analyzer.openCodeQuality", () => {
       CodeQualityPanel.show(context);
