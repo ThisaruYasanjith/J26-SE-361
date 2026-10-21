@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 
 from app.config import ServiceConfig
 from app.context_loader import ContextLoadError, ProjectContextLoader
+from app.conformance_engine import ConformanceEngine, ConformanceError
+from app.conformance_models import ConformanceResult
 from app.models import ProjectContext, ProjectContextSyncResponse
 from app.conflict_detector import ConflictResult
 from app.custom_rule_store import (
@@ -53,6 +55,7 @@ def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBacken
     base_model = model if model is not None else QwenModelService(settings.model_id, settings.model_max_new_tokens)
     generator = RuleGenerationService(retriever, base_model, settings.rag_top_k)
     custom_rules = CustomRuleStore(settings.custom_rules_path, on_change=retriever.invalidate_index)
+    conformance = ConformanceEngine(settings.base_rules_path, custom_rules)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -88,6 +91,11 @@ def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBacken
     async def rag_error(request: Request, error: RAGError) -> JSONResponse:
         return JSONResponse(status_code=error.status_code, content={"detail": str(error)})
 
+    @application.exception_handler(ConformanceError)
+    async def conformance_error(request: Request, error: ConformanceError) -> JSONResponse:
+        logger.warning("Architecture conformance check failed: %s", error)
+        return JSONResponse(status_code=error.status_code, content={"detail": str(error)})
+
     @application.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -103,6 +111,17 @@ def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBacken
             "components": len(context.components),
             "relationships": len(context.relationships),
         }
+
+    @application.post("/conformance/check", response_model=ConformanceResult, response_model_exclude_none=True)
+    def check_conformance() -> ConformanceResult:
+        # The active context is already validated; checking needs neither RAG nor model inference.
+        context = loader.get_context()
+        if context is None:
+            raise ConformanceError("No synchronized project context is available. Analyze and sync a project first.", 409)
+        result = conformance.check(context)
+        logger.info("Conformance for %s: %d violations (%d base, %d custom)", result.project_name,
+                    result.summary.total, result.summary.base_rule_violations, result.summary.custom_rule_violations)
+        return result
 
     @application.post("/rag/rebuild", response_model=RebuildResponse)
     def rebuild_rag() -> RebuildResponse:
