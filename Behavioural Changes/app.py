@@ -308,6 +308,14 @@ def main():
             st.markdown("---")
             st.subheader("Developer Guidance & Regression Test Generation")
 
+            # Method Body Code Changes Box
+            st.markdown("##### 🔍 Method Body Code Changes (v1 → v2)")
+            old_lines = [l.strip() for l in (fp1.method_body or "").splitlines() if l.strip() and not l.strip().startswith("//")]
+            new_lines = [l.strip() for l in (fp2.method_body or "").splitlines() if l.strip() and not l.strip().startswith("//")]
+            diff_lines = [f"- {l}" for l in old_lines if l not in new_lines] + [f"+ {l}" for l in new_lines if l not in old_lines]
+            diff_str = "\n".join(diff_lines) if diff_lines else "// Method bodies are identical. No statements added or removed."
+            st.code(diff_str, language="diff")
+
             # We use the local CodeT5 service response via LLMSemanticAnalyzer
             # The guidance is derived from the category comparison already computed
             added_cats = comparison.get("added_categories", [])

@@ -754,6 +754,9 @@ def analyze_pipeline(request: AnalyzeRequest):
     stage4_data = {
         "overview": ai_comparison.get("overview") or " ".join(guidance_lines),
         "body_comparison_explanation": ai_comparison.get("body_comparison_explanation", ""),
+        "code_diff": ai_comparison.get("code_diff", ""),
+        "added_statements": ai_comparison.get("added_statements", []),
+        "removed_statements": ai_comparison.get("removed_statements", []),
         "ai_source": ai_comparison.get("ai_source", "AI Engine"),
         "detailed_drift_breakdown": f"Added: {added}. Removed: {removed}. Retained: {comparison.retained_categories}.",
         "failure_scenarios": ai_comparison.get("failure_scenarios") or [

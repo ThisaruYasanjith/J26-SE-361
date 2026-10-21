@@ -1,5 +1,13 @@
 import * as vscode from 'vscode';
 import { JavaMethodUtils } from './javaMethodUtils';
+function getNonce(): string {
+  let text = '';
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  for (let i = 0; i < 32; i++) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length));
+  }
+  return text;
+}
 
 export class BehaviouralPanel {
   private static currentPanel: vscode.WebviewPanel | undefined;
@@ -9,6 +17,7 @@ export class BehaviouralPanel {
   public static show(context: vscode.ExtensionContext) {
     if (BehaviouralPanel.currentPanel) {
       BehaviouralPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
+      BehaviouralPanel.currentPanel.webview.html = BehaviouralPanel.getHtmlContent(BehaviouralPanel.currentPanel.webview);
       return;
     }
 
@@ -51,9 +60,7 @@ export class BehaviouralPanel {
       BehaviouralPanel.currentPanel = undefined;
     });
 
-    panel.webview.html = BehaviouralPanel.getHtmlContent();
-
-    // Handle messages from the webview
+    // Handle messages from the webview (register BEFORE setting html so initial messages are not dropped)
     panel.webview.onDidReceiveMessage(async (message) => {
       switch (message.command) {
         case 'checkHealth': {
@@ -95,12 +102,21 @@ export class BehaviouralPanel {
         }
       }
     });
+
+    panel.webview.html = BehaviouralPanel.getHtmlContent(panel.webview);
   }
 
   public static captureFromActiveEditor(context: vscode.ExtensionContext, target: 'v1' | 'v2'): void {
-    const editor = vscode.window.activeTextEditor;
+    // When webview has focus, activeTextEditor might be undefined; fallback to visibleTextEditors
+    let editor = vscode.window.activeTextEditor;
+    if (!editor || (!editor.document.fileName.endsWith('.java') && editor.document.languageId !== 'java')) {
+      editor = vscode.window.visibleTextEditors.find(
+        (e) => e.document.fileName.endsWith('.java') || e.document.languageId === 'java'
+      );
+    }
+
     if (!editor) {
-      vscode.window.showWarningMessage('No active editor. Please open a Java file first.');
+      vscode.window.showWarningMessage('No active Java editor detected. Please open a Java file beside the panel.');
       return;
     }
     const doc = editor.document;
@@ -149,48 +165,75 @@ export class BehaviouralPanel {
   }
 
   private static async checkServiceHealth(): Promise<{ connected: boolean; details?: any; error?: string }> {
-    const url = `${this.getServiceUrl()}/health`;
+    const primaryUrl = `${this.getServiceUrl()}/health`;
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      const response = await fetch(primaryUrl, { signal: AbortSignal.timeout(4000) });
       if (response.ok) {
         const data = await response.json();
         return { connected: true, details: data };
       }
       return { connected: false, error: `Service HTTP ${response.status}` };
     } catch (e: any) {
+      // Fallback for Windows localhost IPv6 vs IPv4 resolution
+      if (primaryUrl.includes('localhost')) {
+        try {
+          const fallbackUrl = primaryUrl.replace('localhost', '127.0.0.1');
+          const fallbackRes = await fetch(fallbackUrl, { signal: AbortSignal.timeout(4000) });
+          if (fallbackRes.ok) {
+            const data = await fallbackRes.json();
+            return { connected: true, details: data };
+          }
+        } catch (_) {}
+      }
       return { connected: false, error: e.message || 'Connection refused' };
     }
   }
 
   private static async analyzeMethods(oldMethod: string, newMethod: string): Promise<any> {
-    const url = `${this.getServiceUrl()}/analyze_pipeline`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ old_method: oldMethod, new_method: newMethod }),
-      signal: AbortSignal.timeout(60000)
-    });
+    const serviceUrl = this.getServiceUrl();
+    const urls = [
+      `${serviceUrl}/analyze_pipeline`,
+      serviceUrl.includes('localhost') ? `${serviceUrl.replace('localhost', '127.0.0.1')}/analyze_pipeline` : null
+    ].filter(Boolean) as string[];
 
-    if (!response.ok) {
-      let errText = await response.text();
+    let lastError: any = null;
+    for (const url of urls) {
       try {
-        const errJson = JSON.parse(errText);
-        if (errJson.detail) {
-          errText = typeof errJson.detail === 'string' ? errJson.detail : JSON.stringify(errJson.detail);
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ old_method: oldMethod, new_method: newMethod }),
+          signal: AbortSignal.timeout(60000)
+        });
+
+        if (!response.ok) {
+          let errText = await response.text();
+          try {
+            const errJson = JSON.parse(errText);
+            if (errJson.detail) {
+              errText = typeof errJson.detail === 'string' ? errJson.detail : JSON.stringify(errJson.detail);
+            }
+          } catch (_) {}
+          throw new Error(`Inference service error (${response.status}): ${errText}`);
         }
-      } catch (_) {}
-      throw new Error(`Inference service error (${response.status}): ${errText}`);
+
+        return await response.json();
+      } catch (err: any) {
+        lastError = err;
+      }
     }
 
-    return await response.json();
+    throw lastError || new Error('Connection refused');
   }
 
-  private static getHtmlContent(): string {
+  private static getHtmlContent(webview: vscode.Webview): string {
+    const nonce = getNonce();
     return `
       <!DOCTYPE html>
       <html lang="en">
       <head>
         <meta charset="UTF-8">
+        <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' 'nonce-${nonce}'; style-src * 'unsafe-inline' https:; font-src * data: https:;">
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vscode/codicons/dist/codicon.css">
         <style>
           body {
@@ -468,7 +511,7 @@ export class BehaviouralPanel {
               <i class="codicon codicon-pass" style="color: #4ade80; font-size: 16px;"></i>
               <strong style="color: #4ade80;">Auto-Captured Refactored Method!</strong>
             </div>
-            <button class="secondary-btn" style="padding: 2px 6px; font-size: 10px;" onclick="document.getElementById('autoCaptureBanner').style.display='none'">Dismiss</button>
+            <button id="dismissBannerBtn" class="secondary-btn" style="padding: 2px 6px; font-size: 10px;" onclick="dismissBanner()">Dismiss</button>
           </div>
           <p id="autoCaptureText" style="font-size: 12px; margin: 4px 0 0 0; color: var(--vscode-foreground);"></p>
         </div>
@@ -477,7 +520,7 @@ export class BehaviouralPanel {
           <div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
               <label for="oldMethodInput" style="margin-bottom: 0;">Baseline Java Method (v1):</label>
-              <button class="secondary-btn" style="padding: 2px 8px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" onclick="captureBaseline()" title="Capture selected Java method from active VS Code editor">
+              <button id="captureBaselineBtn" class="secondary-btn" style="padding: 2px 8px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" onclick="captureBaseline()" title="Capture selected Java method from active VS Code editor">
                 <i class="codicon codicon-arrow-down"></i> Capture Selection
               </button>
             </div>
@@ -486,7 +529,7 @@ export class BehaviouralPanel {
           <div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
               <label for="newMethodInput" style="margin-bottom: 0;">Modified Java Method (v2):</label>
-              <button class="secondary-btn" style="padding: 2px 8px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" onclick="captureModified()" title="Capture current Java method from active VS Code editor">
+              <button id="captureModifiedBtn" class="secondary-btn" style="padding: 2px 8px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" onclick="captureModified()" title="Capture current Java method from active VS Code editor">
                 <i class="codicon codicon-arrow-down"></i> Capture Current
               </button>
             </div>
@@ -603,6 +646,15 @@ export class BehaviouralPanel {
             <div style="font-weight: 600; font-size: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
               <i class="codicon codicon-diff"></i> Method Body Behavioral Comparison
             </div>
+
+            <div style="margin-bottom: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 11px; opacity: 0.85; font-family: monospace; font-weight: 600;">Method Body Code Changes (v1 &rarr; v2):</span>
+                <button id="copyChangesBtn" class="secondary-btn" style="padding: 2px 8px; font-size: 10px;" onclick="copyChanges()">📋 Copy Changes</button>
+              </div>
+              <div class="code-box" id="bodyDiffBox" style="white-space: pre; font-size: 11px; max-height: 250px; line-height: 1.5; font-family: var(--vscode-editor-font-family, monospace);">// No method body changes detected</div>
+            </div>
+
             <div id="bodyComparisonText" style="font-size: 12px; line-height: 1.6; color: var(--vscode-foreground); white-space: pre-wrap;">No method body comparison available.</div>
           </div>
 
@@ -646,17 +698,21 @@ export class BehaviouralPanel {
           </button>
         </div>
 
-        <script>
-          const vscode = acquireVsCodeApi();
-
-
+        <script nonce="${nonce}">
+          let vscode;
+          try {
+            vscode = acquireVsCodeApi();
+          } catch (e) {
+            vscode = window._vscodeApi;
+          }
+          window._vscodeApi = vscode;
 
           function captureBaseline() {
-            vscode.postMessage({ command: 'captureBaselineFromEditor' });
+            if (vscode) vscode.postMessage({ command: 'captureBaselineFromEditor' });
           }
 
           function captureModified() {
-            vscode.postMessage({ command: 'captureModifiedFromEditor' });
+            if (vscode) vscode.postMessage({ command: 'captureModifiedFromEditor' });
           }
 
           function checkHealth() {
@@ -672,7 +728,7 @@ export class BehaviouralPanel {
             if (statusPill) statusPill.className = 'status-pill status-checking';
             if (statusText) statusText.innerText = 'Checking CodeT5...';
 
-            vscode.postMessage({ command: 'checkHealth' });
+            if (vscode) vscode.postMessage({ command: 'checkHealth' });
           }
 
           function resetPanel() {
@@ -698,7 +754,10 @@ export class BehaviouralPanel {
             const alertsDiv = document.getElementById('governanceAlerts');
             if (alertsDiv) alertsDiv.innerHTML = '';
 
-            vscode.postMessage({ command: 'resetState' });
+            const diffBox = document.getElementById('bodyDiffBox');
+            if (diffBox) diffBox.innerHTML = '// No method body changes detected';
+
+            if (vscode) vscode.postMessage({ command: 'resetState' });
           }
 
           function runAnalysis() {
@@ -715,11 +774,30 @@ export class BehaviouralPanel {
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner"></span> <span>Running CodeT5...</span>';
 
-            vscode.postMessage({
-              command: 'analyze',
-              oldMethod,
-              newMethod
-            });
+            if (vscode) {
+              vscode.postMessage({
+                command: 'analyze',
+                oldMethod,
+                newMethod
+              });
+            }
+          }
+
+          function dismissBanner() {
+            const banner = document.getElementById('autoCaptureBanner');
+            if (banner) banner.style.display = 'none';
+          }
+
+          function copyChanges() {
+            const diffBox = document.getElementById('bodyDiffBox');
+            const btn = document.getElementById('copyChangesBtn');
+            if (diffBox && btn) {
+              navigator.clipboard.writeText(diffBox.innerText).then(() => {
+                const orig = btn.innerText;
+                btn.innerText = '✅ Copied!';
+                setTimeout(() => { btn.innerText = orig; }, 2000);
+              });
+            }
           }
 
           function showError(msg) {
@@ -728,18 +806,6 @@ export class BehaviouralPanel {
             const btn = document.getElementById('runBtn');
             btn.disabled = false;
             btn.innerHTML = '<i class="codicon codicon-play"></i> <span>Analyze Method</span>';
-          }
-
-          function copyCode(btn) {
-            const pre = btn.parentElement.nextElementSibling;
-            if (pre) {
-              const text = pre.innerText;
-              navigator.clipboard.writeText(text).then(() => {
-                const orig = btn.innerText;
-                btn.innerText = '✅ Copied!';
-                setTimeout(() => { btn.innerText = orig; }, 2000);
-              });
-            }
           }
 
           function renderChips(containerId, list, extraClass) {
@@ -756,6 +822,40 @@ export class BehaviouralPanel {
               container.appendChild(span);
             });
           }
+
+          // Expose to window for inline onclick handlers
+          window.captureBaseline = captureBaseline;
+          window.captureModified = captureModified;
+          window.checkHealth = checkHealth;
+          window.resetPanel = resetPanel;
+          window.runAnalysis = runAnalysis;
+          window.dismissBanner = dismissBanner;
+          window.copyChanges = copyChanges;
+
+          // Wire up event listeners
+          document.getElementById('refreshBtn')?.addEventListener('click', checkHealth);
+          document.getElementById('runBtn')?.addEventListener('click', runAnalysis);
+          document.getElementById('captureBaselineBtn')?.addEventListener('click', captureBaseline);
+          document.getElementById('captureModifiedBtn')?.addEventListener('click', captureModified);
+          document.getElementById('resetBtn')?.addEventListener('click', resetPanel);
+          document.getElementById('dismissBannerBtn')?.addEventListener('click', dismissBanner);
+          document.getElementById('copyChangesBtn')?.addEventListener('click', copyChanges);
+
+          // Delegated event listener for copying test cases
+          document.addEventListener('click', (event) => {
+            const target = event.target;
+            if (target && target.classList && target.classList.contains('copy-test-btn')) {
+              const container = target.closest('div').parentElement;
+              const codeBox = container ? container.querySelector('.code-box') : null;
+              if (codeBox) {
+                navigator.clipboard.writeText(codeBox.innerText).then(() => {
+                  const orig = target.innerText;
+                  target.innerText = '✅ Copied!';
+                  setTimeout(() => { target.innerText = orig; }, 2000);
+                });
+              }
+            }
+          });
 
           // Handle incoming messages from extension
           window.addEventListener('message', event => {
@@ -889,6 +989,39 @@ export class BehaviouralPanel {
                     bodyCompText.innerText = s6.body_comparison_explanation || 'No statement-level divergence detected between baseline and modified method bodies.';
                   }
 
+                  // Render Code Changes in Method Body Diff Box
+                  const diffBox = document.getElementById('bodyDiffBox');
+                  if (diffBox) {
+                    let diffText = s6.code_diff;
+                    const nl = String.fromCharCode(10);
+                    if (!diffText) {
+                      const oldLines = (s3.old_method?.method_body || '').split(nl).map(l => l.trim()).filter(l => l && !l.startsWith('//'));
+                      const newLines = (s3.new_method?.method_body || '').split(nl).map(l => l.trim()).filter(l => l && !l.startsWith('//'));
+                      const removed = oldLines.filter(l => !newLines.includes(l));
+                      const added = newLines.filter(l => !oldLines.includes(l));
+                      if (removed.length === 0 && added.length === 0) {
+                        diffText = '// Method bodies are identical. No statements added or removed.';
+                      } else {
+                        const dLines = [];
+                        removed.forEach(l => dLines.push('- ' + l));
+                        added.forEach(l => dLines.push('+ ' + l));
+                        diffText = dLines.join(nl);
+                      }
+                    }
+
+                    const lines = (diffText || '').split(nl);
+                    diffBox.innerHTML = lines.map(line => {
+                      const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                      if (line.startsWith('+')) {
+                        return '<div style="color: #4ade80; background: rgba(74, 222, 128, 0.08); padding: 1px 4px; border-radius: 2px;">' + escaped + '</div>';
+                      } else if (line.startsWith('-')) {
+                        return '<div style="color: #f87171; background: rgba(248, 113, 113, 0.08); padding: 1px 4px; border-radius: 2px;">' + escaped + '</div>';
+                      } else {
+                        return '<div style="opacity: 0.7; padding: 1px 4px;">' + escaped + '</div>';
+                      }
+                    }).join('');
+                  }
+
                   const techEl = document.getElementById('techBreakdownText');
                   if (techEl) {
                     techEl.innerText = s6.detailed_drift_breakdown || 'No technical divergence breakdown available.';
@@ -914,7 +1047,7 @@ export class BehaviouralPanel {
                         <div style="margin-bottom: 8px;">
                           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
                             <span style="font-size: 11px; opacity: 0.8; font-family: monospace;">Test #\${idx + 1} (JUnit 5):</span>
-                            <button class="secondary-btn" style="padding: 2px 8px; font-size: 10px;" onclick="copyCode(this)">📋 Copy Test</button>
+                            <button class="secondary-btn copy-test-btn" style="padding: 2px 8px; font-size: 10px;">📋 Copy Test</button>
                           </div>
                           <div class="code-box" style="white-space: pre; font-size: 11px; max-height: 250px;">\${escaped}</div>
                         </div>

@@ -39,6 +39,13 @@ def _build_local_body_comparison(
     removed_statements = [line for line in old_lines if line not in new_lines]
     retained_statements = [line for line in old_lines if line in new_lines]
 
+    diff_lines = []
+    for stmt in removed_statements:
+        diff_lines.append(f"- {stmt}")
+    for stmt in added_statements:
+        diff_lines.append(f"+ {stmt}")
+    code_diff = "\n".join(diff_lines) if diff_lines else "// Method bodies are identical. No statements added or removed."
+
     explanation_lines = []
     explanation_lines.append(f"### Method Body Behavioral Comparison: `{method_name}`")
     explanation_lines.append("")
@@ -167,6 +174,9 @@ def _build_local_body_comparison(
 
     return {
         "body_comparison_explanation": "\n".join(explanation_lines),
+        "code_diff": code_diff,
+        "added_statements": added_statements,
+        "removed_statements": removed_statements,
         "overview": overview,
         "failure_scenarios": failure_scenarios,
         "recommended_unit_tests": junit_tests,
@@ -191,6 +201,13 @@ def generate_ai_body_comparison(
     Falls back gracefully to the deterministic local semantic comparator if no keys
     are configured or if external calls fail.
     """
+    old_lines = [line.strip() for line in old_body.splitlines() if line.strip() and not line.strip().startswith("//")]
+    new_lines = [line.strip() for line in new_body.splitlines() if line.strip() and not line.strip().startswith("//")]
+    added_statements = [line for line in new_lines if line not in old_lines]
+    removed_statements = [line for line in old_lines if line not in new_lines]
+    diff_lines = [f"- {s}" for s in removed_statements] + [f"+ {s}" for s in added_statements]
+    code_diff = "\n".join(diff_lines) if diff_lines else "// Method bodies are identical. No statements added or removed."
+
     # 1. Try Groq if GROQ_API_KEY is available
     groq_api_key = os.getenv("GROQ_API_KEY", "").strip()
     if groq_api_key:
@@ -246,6 +263,9 @@ Respond ONLY with a valid JSON object matching this schema:
             parsed = json.loads(raw)
             return {
                 "body_comparison_explanation": parsed.get("body_comparison_explanation", ""),
+                "code_diff": code_diff,
+                "added_statements": added_statements,
+                "removed_statements": removed_statements,
                 "overview": parsed.get("overview", ""),
                 "failure_scenarios": parsed.get("failure_scenarios", []),
                 "recommended_unit_tests": parsed.get("recommended_unit_tests", []),
@@ -288,6 +308,9 @@ Return JSON with:
                 parsed = json.loads(text)
                 return {
                     "body_comparison_explanation": parsed.get("body_comparison_explanation", ""),
+                    "code_diff": code_diff,
+                    "added_statements": added_statements,
+                    "removed_statements": removed_statements,
                     "overview": parsed.get("overview", ""),
                     "failure_scenarios": parsed.get("failure_scenarios", []),
                     "recommended_unit_tests": parsed.get("recommended_unit_tests", []),
