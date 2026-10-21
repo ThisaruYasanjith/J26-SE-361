@@ -6,6 +6,8 @@ import { BehaviouralPanel } from "./behavioural/behaviouralPanel";
 import { RuntimePanel } from "./runtime/runtimePanel";
 import { AnalyzerRunner } from "./architecture/analyzerRunner";
 import { ProjectAnalysisWorkflow } from "./architecture/analysisWorkflow";
+import { ArchitectureBackendClient, DEFAULT_BACKEND_URL } from "./architecture/backendClient";
+import { ProjectContextSyncWorkflow } from "./architecture/contextSyncWorkflow";
 
 export function activate(context: vscode.ExtensionContext) {
   const architectureOutput = vscode.window.createOutputChannel("Architecture Governance");
@@ -32,6 +34,14 @@ export function activate(context: vscode.ExtensionContext) {
     showError: message => { void vscode.window.showErrorMessage(message); },
   });
   context.subscriptions.push(analysis);
+  const syncClient = new ArchitectureBackendClient(
+    () => vscode.workspace.getConfiguration('architectureGovernance').get<string>('aiBackendUrl', DEFAULT_BACKEND_URL),
+    architectureOutput,
+  );
+  const contextSync = new ProjectContextSyncWorkflow(analysis, syncClient, architectureOutput);
+  context.subscriptions.push(syncClient, contextSync, vscode.workspace.onDidChangeConfiguration(event => {
+    if (event.affectsConfiguration('architectureGovernance.aiBackendUrl')) { contextSync.reset(); }
+  }));
   // Register sidebar buttons view
   vscode.window.registerTreeDataProvider(
     "analyzer.dashboardView",
@@ -41,10 +51,10 @@ export function activate(context: vscode.ExtensionContext) {
   // Register commands to open each full window panel
   context.subscriptions.push(
     vscode.commands.registerCommand("analyzer.openArchitecture", () => {
-      ArchitecturePanel.show(context, architectureOutput, analysis);
+      ArchitecturePanel.show(context, architectureOutput, analysis, contextSync);
     }),
     vscode.commands.registerCommand("architectureGovernance.analyzeProject", async () => {
-      ArchitecturePanel.show(context, architectureOutput, analysis);
+      ArchitecturePanel.show(context, architectureOutput, analysis, contextSync);
       await analysis.run();
     }),
     vscode.commands.registerCommand("analyzer.openCodeQuality", () => {

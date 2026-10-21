@@ -263,6 +263,13 @@ class ArchitectureRetriever:
             # The next retrieval rebuilds from disk; approval itself needs no embeddings or model load.
             self._snapshot = None
 
+    def update_project_context(self, context: ProjectContext) -> ProjectContext:
+        # Keep publication and invalidation under the same lock used by retrieval and rebuilds.
+        with self._lock:
+            updated = self.loader.replace(context)
+            self.invalidate_index()
+            return updated
+
     def _context(self) -> ProjectContext:
         context = self.loader.get_context()
         if context is None:

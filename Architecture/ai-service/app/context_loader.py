@@ -1,9 +1,16 @@
 import json
+import logging
+import os
+import tempfile
+import threading
 from pathlib import Path
 
 from pydantic import ValidationError
 
 from app.models import ProjectContext
+
+
+logger = logging.getLogger(__name__)
 
 
 class ContextLoadError(RuntimeError):
@@ -14,8 +21,13 @@ class ProjectContextLoader:
     def __init__(self, context_path: str | Path) -> None:
         self.context_path = Path(context_path).expanduser().resolve()
         self._context: ProjectContext | None = None
+        self._lock = threading.RLock()
 
     def load(self) -> ProjectContext:
+        with self._lock:
+            return self._load()
+
+    def _load(self) -> ProjectContext:
         try:
             text = self.context_path.read_text(encoding="utf-8")
         except FileNotFoundError as error:
@@ -33,8 +45,14 @@ class ProjectContextLoader:
                 f"column {error.colno}: {error.msg}"
             ) from error
 
+        context = self._validate(data)
+        # A failed reload must not replace the last context that loaded successfully.
+        self._context = context
+        return context
+
+    def _validate(self, data: object) -> ProjectContext:
         try:
-            context = ProjectContext.model_validate(data)
+            return ProjectContext.model_validate(data)
         except ValidationError as error:
             # Field paths are more useful here than dumping the entire input document into logs.
             details = "; ".join(
@@ -43,15 +61,39 @@ class ProjectContextLoader:
             )
             raise ContextLoadError(f"Invalid project context structure in {self.context_path}: {details}") from error
 
-        # A failed reload must not replace the last context that loaded successfully.
-        self._context = context
-        return context
+    def replace(self, data: ProjectContext | dict) -> ProjectContext:
+        with self._lock:
+            # Revalidate model instances too, since a caller might have changed one after construction.
+            context = self._validate(data.model_dump(exclude_none=True) if isinstance(data, ProjectContext) else data)
+            temporary_path = None
+            try:
+                self.context_path.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.context_path.parent,
+                                                 prefix=".project-context-", suffix=".tmp", delete=False) as stream:
+                    temporary_path = Path(stream.name)
+                    json.dump(context.model_dump(mode="json", exclude_none=True), stream, indent=2, ensure_ascii=False, allow_nan=False)
+                    stream.write("\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary_path, self.context_path)
+            except (OSError, ValueError) as error:
+                raise ContextLoadError(f"Cannot store project context at {self.context_path}: {error}") from error
+            finally:
+                if temporary_path is not None:
+                    try:
+                        temporary_path.unlink(missing_ok=True)
+                    except OSError:
+                        logger.warning("Could not remove temporary context file %s", temporary_path)
+            # Publish only after replacement succeeds; failed writes leave both disk and memory intact.
+            self._context = context
+            return context
 
     def reload(self) -> ProjectContext:
         return self.load()
 
     def get_context(self) -> ProjectContext | None:
-        return self._context
+        with self._lock:
+            return self._context
 
     def is_loaded(self) -> bool:
-        return self._context is not None
+        return self.get_context() is not None

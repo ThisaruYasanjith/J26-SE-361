@@ -5,11 +5,13 @@ import { isRecord } from './contracts';
 import { ArchitectureRuleWorkflow } from './ruleWorkflow';
 import { analysisFormHtml, ruleFormHtml, ruleWebviewScript } from './architectureView';
 import { ProjectAnalysisWorkflow } from './analysisWorkflow';
+import { ProjectContextSyncWorkflow } from './contextSyncWorkflow';
 
 export class ArchitecturePanel {
   private static currentPanel: vscode.WebviewPanel | undefined;
 
-  public static show(context: vscode.ExtensionContext, output: vscode.OutputChannel, analysis: ProjectAnalysisWorkflow) {
+  public static show(context: vscode.ExtensionContext, output: vscode.OutputChannel, analysis: ProjectAnalysisWorkflow,
+    contextSync: ProjectContextSyncWorkflow) {
     if (ArchitecturePanel.currentPanel) {
       ArchitecturePanel.currentPanel.reveal(vscode.ViewColumn.Beside);
       return;
@@ -33,11 +35,29 @@ export class ArchitecturePanel {
       if (!disposed) { void panel.webview.postMessage(message); }
     };
     const unsubscribeAnalysis = analysis.subscribe(state => send({ type: 'analysis', state }));
+    const sendSync = () => send({ type: 'contextSync', state: contextSync.state,
+      canSync: contextSync.canSync, syncing: contextSync.isRunning });
+    let lastSyncState = contextSync.state;
+    const unsubscribeSync = contextSync.subscribe(state => {
+      // An interpretation reviewed against the previous context should be regenerated.
+      if (state.status === 'synchronized' && state !== lastSyncState) {
+        workflow.clear();
+        send({ type: 'contextChanged' });
+      }
+      lastSyncState = state;
+      sendSync();
+    });
     const listener = panel.webview.onDidReceiveMessage(async (message: unknown) => {
       if (!isRecord(message) || disposed) { return; }
-      if (message.type === 'ready') { send({ type: 'analysis', state: analysis.state }); return; }
-      if (busy) { return; }
+      if (message.type === 'ready') { send({ type: 'analysis', state: analysis.state }); sendSync(); return; }
+      if (busy || contextSync.isRunning) { return; }
       if (message.type === 'scan') { await analysis.run(); return; }
+      if (message.type === 'sync') {
+        await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
+          title: 'Synchronizing project architecture context...' }, async () => contextSync.run());
+        return;
+      }
+      if (analysis.state.status === 'selecting' || analysis.state.status === 'running') { return; }
       if (message.type === 'edit') { workflow.clear(); return; }
       if (message.type !== 'generate' && message.type !== 'approve') { return; }
       if (message.type === 'generate' && typeof message.requirement !== 'string') { return; }
@@ -84,6 +104,7 @@ export class ArchitecturePanel {
       disposed = true;
       listener.dispose();
       unsubscribeAnalysis();
+      unsubscribeSync();
       client.dispose();
       ArchitecturePanel.currentPanel = undefined;
     });

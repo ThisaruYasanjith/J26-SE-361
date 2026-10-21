@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
-import { isRecord } from './contracts';
+import { isProjectContext, ProjectContext } from './contracts';
 
 export interface WorkspaceProject { name: string; fsPath: string; scheme: string; }
 export interface AnalysisSummary {
@@ -119,6 +119,28 @@ function inside(root: string, candidate: string): boolean {
   return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
+export async function readProjectContext(projectRoot: string, files: AnalyzerFiles = localFiles): Promise<ProjectContext> {
+  const contextPath = path.join(projectRoot, '.architecture', 'project_context.json');
+  try {
+    if (!(await inspect(contextPath, files))?.isFile()) {
+      throw new AnalyzerError('context', 'Project context file is missing. Scan Project Architecture first.');
+    }
+    if (!inside(await files.realpath(projectRoot), await files.realpath(contextPath))) {
+      throw new AnalyzerError('context', 'The project context points outside the selected workspace.');
+    }
+    const context: unknown = JSON.parse(await files.readFile(contextPath, 'utf8'));
+    if (!isProjectContext(context)) {
+      throw new AnalyzerError('context', 'The project_context.json has an unsupported version or missing project/array fields.');
+    }
+    return context;
+  } catch (error) {
+    if (error instanceof AnalyzerError) { throw error; }
+    if (error instanceof SyntaxError) { throw new AnalyzerError('context', 'The project_context.json is not valid JSON.'); }
+    const code = (error as NodeJS.ErrnoException).code;
+    throw new AnalyzerError('permissions', 'Cannot read project_context.json. Check file permissions and Architecture Governance output.', `${code ?? ''}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export class AnalyzerRunner {
   constructor(private readonly extensionRoot: string, private readonly output: AnalyzerLog,
     private readonly execute: (request: JavaRunRequest) => Promise<JavaRunResult> = runJavaAnalyzer,
@@ -170,18 +192,7 @@ export class AnalyzerRunner {
       if (!(await inspect(contextPath, this.files))?.isFile()) {
         throw new AnalyzerError('context', 'The analyzer finished but did not generate .architecture/project_context.json.');
       }
-      if (!inside(canonicalRoot, await this.files.realpath(contextPath))) {
-        throw new AnalyzerError('context', 'The generated context points outside the selected workspace.');
-      }
-      let context: unknown;
-      try { context = JSON.parse(await this.files.readFile(contextPath, 'utf8')); } catch (error) {
-        if (error instanceof SyntaxError) { throw new AnalyzerError('context', 'The generated project_context.json is not valid JSON.'); }
-        throw error;
-      }
-      if (!isRecord(context) || context.schema_version !== '1.0' || typeof context.project_name !== 'string'
-        || !context.project_name.trim() || !Array.isArray(context.components) || !Array.isArray(context.relationships)) {
-        throw new AnalyzerError('context', 'The generated project_context.json has an unsupported version or missing project/array fields.');
-      }
+      const context = await readProjectContext(projectRoot, this.files);
       this.output.appendLine(`Generated project context: ${contextPath}`);
       return { projectRoot, contextPath, projectName: context.project_name,
         componentCount: context.components.length, relationshipCount: context.relationships.length };

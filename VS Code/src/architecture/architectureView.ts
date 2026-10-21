@@ -4,7 +4,9 @@ export const analysisFormHtml = `
     <button id="scan" type="button">Scan Project Architecture</button>
     <p id="scan-status" role="status" aria-live="polite">Scan the opened Java project to generate its local architecture context.</p>
     <dl id="scan-summary"></dl>
-    <p>This scan updates local context only. The AI backend context is unchanged.</p>
+    <button id="sync" type="button" disabled>Sync Project Context</button>
+    <p id="sync-status" role="status" aria-live="polite">AI context: not synchronized.</p>
+    <p>After scanning, sync architecture metadata to use this project for AI rule generation.</p>
   </section>`;
 
 export const ruleFormHtml = `
@@ -35,14 +37,19 @@ export const ruleWebviewScript = `
   const scan = document.getElementById('scan');
   const scanStatus = document.getElementById('scan-status');
   const scanSummary = document.getElementById('scan-summary');
+  const sync = document.getElementById('sync');
+  const syncStatus = document.getElementById('sync-status');
   let busy = false;
   let analysisBusy = false;
+  let syncBusy = false;
+  let canSync = false;
   let canApprove = false;
   function updateButtons() {
-    input.disabled = busy || analysisBusy;
-    generate.disabled = busy || analysisBusy;
-    approve.disabled = busy || analysisBusy || !canApprove;
-    scan.disabled = busy || analysisBusy;
+    input.disabled = busy || analysisBusy || syncBusy;
+    generate.disabled = busy || analysisBusy || syncBusy;
+    approve.disabled = busy || analysisBusy || syncBusy || !canApprove;
+    scan.disabled = busy || analysisBusy || syncBusy;
+    sync.disabled = busy || analysisBusy || syncBusy || !canSync;
   }
   function clearProposal() {
     canApprove = false;
@@ -64,11 +71,18 @@ export const ruleWebviewScript = `
     errors.textContent = items.map(item => item.path + ': ' + item.message).join('\\n');
   }
   scan.addEventListener('click', () => {
-    if (busy || analysisBusy) { return; }
+    if (busy || analysisBusy || syncBusy) { return; }
     analysisBusy = true;
     updateButtons();
     scanStatus.textContent = 'Preparing architecture scan...';
     vscode.postMessage({ type: 'scan' });
+  });
+  sync.addEventListener('click', () => {
+    if (busy || analysisBusy || syncBusy || !canSync) { return; }
+    syncBusy = true;
+    updateButtons();
+    syncStatus.textContent = 'AI context: synchronizing...';
+    vscode.postMessage({ type: 'sync' });
   });
   input.addEventListener('input', () => {
     clearProposal();
@@ -77,7 +91,7 @@ export const ruleWebviewScript = `
   });
   document.getElementById('rule-form').addEventListener('submit', event => {
     event.preventDefault();
-    if (busy) { return; }
+    if (busy || analysisBusy || syncBusy) { return; }
     const requirement = input.value.trim();
     clearProposal();
     if (!requirement) { status.textContent = 'Enter an architecture rule first.'; return; }
@@ -87,7 +101,7 @@ export const ruleWebviewScript = `
     vscode.postMessage({ type: 'generate', requirement });
   });
   approve.addEventListener('click', () => {
-    if (busy || !canApprove) { return; }
+    if (busy || analysisBusy || syncBusy || !canApprove) { return; }
     busy = true;
     updateButtons();
     status.textContent = 'Checking conflicts and approving...';
@@ -113,6 +127,20 @@ export const ruleWebviewScript = `
       }
     }
     if (message.type === 'busy') { busy = message.busy; }
+    if (message.type === 'contextSync') {
+      const state = message.state;
+      canSync = message.canSync;
+      syncBusy = message.syncing;
+      syncStatus.textContent = state.status === 'synchronized'
+        ? 'AI context: synchronized. ' + state.response.project_name + ': ' + state.response.components
+          + ' components, ' + state.response.relationships + ' relationships.'
+        : state.status === 'syncing' ? 'AI context: synchronizing...'
+        : 'AI context: not synchronized.' + (state.message ? ' ' + state.message : '');
+    }
+    if (message.type === 'contextChanged') {
+      clearProposal();
+      status.textContent = 'Project context updated. Generate a new interpretation.';
+    }
     if (message.type === 'proposal') {
       const response = message.response;
       clearProposal();

@@ -1,6 +1,7 @@
 import {
   ApprovalResponse, ConflictResponse, GeneratedRuleResponse, ValidRuleEnvelope, ValidationError,
   isApprovalResponse, isConflictResponse, isGeneratedResponse, isRecord, isValidationError,
+  ProjectContext, ProjectContextSyncResponse, isContextSyncResponse,
 } from './contracts';
 
 export const DEFAULT_BACKEND_URL = 'http://127.0.0.1:8000';
@@ -11,6 +12,10 @@ export interface ArchitectureBackend {
   generateRule(requirement: string): Promise<GeneratedRuleResponse>;
   checkConflicts(rule: ValidRuleEnvelope): Promise<ConflictResponse>;
   approveRule(rule: ValidRuleEnvelope, confirmConflicts?: boolean): Promise<ApprovalResponse>;
+}
+export interface ContextSyncBackend {
+  readonly baseUrl: string;
+  syncProjectContext(context: ProjectContext): Promise<ProjectContextSyncResponse>;
 }
 export class BackendApiError extends Error {
   constructor(public readonly kind: BackendErrorKind, message: string, public readonly status?: number,
@@ -32,7 +37,7 @@ export function friendlyError(error: unknown): string {
   return error instanceof BackendApiError ? error.message : 'Architecture request failed. See the Architecture Governance output channel.';
 }
 
-export class ArchitectureBackendClient implements ArchitectureBackend {
+export class ArchitectureBackendClient implements ArchitectureBackend, ContextSyncBackend {
   private readonly requests = new Set<AbortController>();
   private disposed = false;
 
@@ -44,30 +49,34 @@ export class ArchitectureBackendClient implements ArchitectureBackend {
   generateRule(requirement: string): Promise<GeneratedRuleResponse> {
     const trimmed = requirement.trim();
     if (!trimmed) { throw new BackendApiError('input', 'Enter an architecture rule first.'); }
-    return this.post('/rules/generate', { requirement: trimmed, use_rag: true }, isGeneratedResponse);
+    return this.request('POST', '/rules/generate', { requirement: trimmed, use_rag: true }, isGeneratedResponse);
   }
   checkConflicts(rule: ValidRuleEnvelope): Promise<ConflictResponse> {
-    return this.post('/rules/check-conflicts', { rule }, isConflictResponse);
+    return this.request('POST', '/rules/check-conflicts', { rule }, isConflictResponse);
   }
   approveRule(rule: ValidRuleEnvelope, confirmConflicts = false): Promise<ApprovalResponse> {
-    return this.post('/rules/approve', { rule, confirm_conflicts: confirmConflicts }, isApprovalResponse);
+    return this.request('POST', '/rules/approve', { rule, confirm_conflicts: confirmConflicts }, isApprovalResponse);
+  }
+  syncProjectContext(context: ProjectContext): Promise<ProjectContextSyncResponse> {
+    this.output.appendLine(`Sync project ${JSON.stringify(context.project_name)}: ${context.components.length} components, ${context.relationships.length} relationships`);
+    return this.request('PUT', '/context/project', context, isContextSyncResponse);
   }
   dispose(): void {
     this.disposed = true;
     for (const request of this.requests) { request.abort(); }
   }
 
-  private async post<T>(path: string, payload: unknown, accepts: (value: unknown) => value is T): Promise<T> {
+  private async request<T>(method: 'POST' | 'PUT', path: string, payload: unknown, accepts: (value: unknown) => value is T): Promise<T> {
     if (this.disposed) { throw new BackendApiError('cancelled', 'Architecture request cancelled.'); }
     const baseUrl = this.baseUrl;
-    this.output.appendLine(`POST ${baseUrl}${path}`);
+    this.output.appendLine(`${method} ${baseUrl}${path}`);
     const controller = new AbortController();
     this.requests.add(controller);
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, this.timeoutMs);
     try {
       const response = await this.fetchRequest(`${baseUrl}${path}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        method, headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(payload), signal: controller.signal, redirect: 'error',
       });
       this.output.appendLine(`${path}: HTTP ${response.status}`);
@@ -79,7 +88,9 @@ export class ArchitectureBackendClient implements ArchitectureBackend {
       }
       if (!response.ok) {
         const conflicts = response.status === 409 && isConflictResponse(data) ? data : undefined;
-        const errors = isRecord(data) && Array.isArray(data.validation_errors) ? data.validation_errors.filter(isValidationError) : [];
+        const errors = isRecord(data) && Array.isArray(data.validation_errors) ? data.validation_errors.filter(isValidationError)
+          : isRecord(data) && Array.isArray(data.detail) ? data.detail.filter(item => isRecord(item) && Array.isArray(item.loc) && typeof item.msg === 'string')
+            .map(item => ({ path: item.loc.join('.'), message: item.msg } as ValidationError)) : [];
         for (const issue of errors) { this.output.appendLine(`Validation failure at ${issue.path}`); }
         if (conflicts) { this.output.appendLine(`Conflicts: ${conflicts.conflicts.map(item => item.existing_rule_id).join(', ')}`); }
         const detail = isRecord(data) && typeof data.detail === 'string' ? data.detail.split(/\r?\n/)[0].slice(0, 300) : '';
@@ -100,6 +111,9 @@ export class ArchitectureBackendClient implements ArchitectureBackend {
       }
       if (isApprovalResponse(data)) {
         this.output.appendLine(`Approval: ${data.rule_id}, duplicate=${data.duplicate}, conflicts confirmed=${data.conflicts_confirmed}`);
+      }
+      if (isContextSyncResponse(data)) {
+        this.output.appendLine(`Context synchronized: ${JSON.stringify(data.project_name)}, ${data.components} components, ${data.relationships} relationships. RAG index invalidated; next retrieval rebuilds.`);
       }
       return data;
     } catch (error) {

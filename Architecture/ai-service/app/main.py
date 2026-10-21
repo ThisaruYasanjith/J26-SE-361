@@ -3,11 +3,12 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.config import ServiceConfig
 from app.context_loader import ContextLoadError, ProjectContextLoader
+from app.models import ProjectContext, ProjectContextSyncResponse
 from app.conflict_detector import ConflictResult
 from app.custom_rule_store import (
     CustomRuleStore,
@@ -107,6 +108,18 @@ def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBacken
     def rebuild_rag() -> RebuildResponse:
         count = retriever.rebuild_index()
         return RebuildResponse(indexed=True, documents=count)
+
+    @application.put("/context/project", response_model=ProjectContextSyncResponse)
+    def sync_project_context(context: ProjectContext) -> ProjectContextSyncResponse:
+        try:
+            updated = retriever.update_project_context(context)
+        except ContextLoadError as error:
+            logger.error("Project context synchronization failed: %s", error)
+            raise HTTPException(status_code=503, detail="Cannot store project context. Check the backend context path and permissions.") from error
+        logger.info("Synchronized project %s: %d components, %d relationships; RAG index invalidated",
+                    updated.project_name, len(updated.components), len(updated.relationships))
+        return ProjectContextSyncResponse(updated=True, project_name=updated.project_name,
+                                          components=len(updated.components), relationships=len(updated.relationships), rag_invalidated=True)
 
     @application.post("/rag/retrieve", response_model=RetrievalResponse, response_model_exclude_none=True)
     def retrieve_rag(request: RetrievalRequest) -> RetrievalResponse:

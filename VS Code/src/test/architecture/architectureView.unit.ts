@@ -120,3 +120,42 @@ test('cancelled scan clears progress and leaves the existing AI proposal availab
   assert.match(element('scan-status').textContent, /cancelled/);
   assert.equal(element('approve').disabled, false);
 });
+
+test('sync is explicit, disabled before scanning, and sends no context or paths from the webview', () => {
+  const { element, receive, sent } = view();
+  receive({ type: 'contextSync', state: { status: 'not-synchronized' }, canSync: false, syncing: false });
+  assert.ok(element('sync').disabled);
+  element('sync').fire('click');
+  assert.equal(sent.length, 0);
+  receive({ type: 'contextSync', state: { status: 'not-synchronized' }, canSync: true, syncing: false });
+  assert.equal(sent.length, 0);
+  element('sync').fire('click');
+  assert.deepEqual(sent, [{ type: 'sync' }]);
+  assert.ok(element('sync').disabled && element('scan').disabled && element('generate').disabled);
+});
+
+test('sync failure preserves scan summary and shows an independent retryable status', () => {
+  const { element, receive } = view();
+  receive({ type: 'analysis', state: { status: 'succeeded', summary: {
+    projectName: 'payments', componentCount: 7, relationshipCount: 15, contextPath: '/project/.architecture/project_context.json',
+  } } });
+  const summary = element('scan-summary').children.map(item => item.textContent);
+  receive({ type: 'contextSync', state: { status: 'failed', message: 'Cannot reach backend.' }, canSync: true, syncing: false });
+  assert.match(element('sync-status').textContent, /AI context: not synchronized.*Cannot reach backend/);
+  assert.match(element('scan-status').textContent, /scan complete/);
+  assert.deepEqual(element('scan-summary').children.map(item => item.textContent), summary);
+  assert.equal(element('sync').disabled, false);
+});
+
+test('successful sync reports backend metadata and clears a stale rule interpretation', () => {
+  const { element, receive } = view();
+  receive({ type: 'proposal', response, canApprove: true });
+  receive({ type: 'contextSync', state: { status: 'synchronized', response: {
+    project_name: 'payments', components: 7, relationships: 15,
+  } }, canSync: true, syncing: false });
+  receive({ type: 'contextChanged' });
+  assert.match(element('sync-status').textContent, /AI context: synchronized.*payments: 7 components, 15 relationships/);
+  assert.ok(element('approve').disabled);
+  assert.equal(element('interpretation').children.length, 0);
+  assert.equal(element('generate').disabled, false);
+});

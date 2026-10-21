@@ -1,7 +1,7 @@
 import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ArchitectureBackendClient, BackendApiError, normalizeBaseUrl } from '../../architecture/backendClient';
-import { GeneratedRuleResponse, ValidRuleEnvelope } from '../../architecture/contracts';
+import { GeneratedRuleResponse, ProjectContext, ValidRuleEnvelope } from '../../architecture/contracts';
 
 export const rule: ValidRuleEnvelope = {
   status: 'VALID', reason_code: null,
@@ -120,3 +120,62 @@ test('aborts a timed-out request', async () => {
   const client = new ArchitectureBackendClient(() => 'https://gpu.example', { appendLine() {} }, fetcher, 10);
   await assert.rejects(client.generateRule('Explain access.'), (error: unknown) => error instanceof BackendApiError && error.kind === 'timeout');
 });
+
+const projectContext: ProjectContext = {
+  schema_version: '1.0', project_name: 'payments', project_root: '.', components: [], relationships: [],
+};
+const syncResult = { updated: true, project_name: 'payments', components: 0, relationships: 0, rag_invalidated: true };
+
+test('sync uses PUT, configured URL and the complete context without a wrapper', async () => {
+  const logs: string[] = [];
+  let configured = 'https://first.example/api/';
+  const urls: string[] = [];
+  const client = new ArchitectureBackendClient(() => configured, { appendLine: line => logs.push(line) }, async (url, options) => {
+    urls.push(String(url));
+    assert.equal(options?.method, 'PUT');
+    assert.deepEqual(JSON.parse(String(options?.body)), projectContext);
+    return new Response(JSON.stringify(syncResult));
+  });
+  assert.deepEqual(await client.syncProjectContext(projectContext), syncResult);
+  configured = 'http://127.0.0.1:9000/prefix';
+  await client.syncProjectContext(projectContext);
+  assert.deepEqual(urls, ['https://first.example/api/context/project', 'http://127.0.0.1:9000/prefix/context/project']);
+  for (const text of ['payments', 'HTTP 200', '0 components', '0 relationships', 'RAG index invalidated']) {
+    assert.ok(logs.some(line => line.includes(text)));
+  }
+  assert.ok(!logs.some(line => line.includes('schema_version')));
+});
+
+test('sync exposes FastAPI validation field paths without logging the entire rejected body', async () => {
+  const { client, logs } = setup({ detail: [{ loc: ['body', 'components', 0, 'name'], msg: 'Field required', input: 'private data' }] }, 422);
+  await assert.rejects(client.syncProjectContext(projectContext), (error: unknown) => error instanceof BackendApiError
+    && error.status === 422 && error.validationErrors[0].path === 'body.components.0.name');
+  assert.ok(logs.some(line => line.includes('body.components.0.name')));
+  assert.ok(!logs.some(line => line.includes('private data')));
+});
+
+for (const status of [400, 503]) {
+  test(`sync handles HTTP ${status}`, async () => {
+    await assert.rejects(setup({ detail: 'Cannot store context' }, status).client.syncProjectContext(projectContext),
+      (error: unknown) => error instanceof BackendApiError && error.status === status);
+  });
+}
+
+test('sync handles an unavailable backend', async () => {
+  const client = new ArchitectureBackendClient(() => 'https://gpu.example', { appendLine() {} }, async () => { throw new TypeError('fetch failed'); });
+  await assert.rejects(client.syncProjectContext(projectContext), (error: unknown) => error instanceof BackendApiError && error.kind === 'network');
+});
+
+test('sync handles timeout using the existing request cancellation', async () => {
+  const client = new ArchitectureBackendClient(() => 'https://gpu.example', { appendLine() {} }, async (_url, options) => new Promise<Response>((_resolve, reject) => {
+    options?.signal?.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
+  }), 10);
+  await assert.rejects(client.syncProjectContext(projectContext), (error: unknown) => error instanceof BackendApiError && error.kind === 'timeout');
+});
+
+for (const data of [{ ...syncResult, updated: false }, { ...syncResult, components: -1 }, { ...syncResult, rag_invalidated: false }]) {
+  test('sync rejects an unexpected response contract', async () => {
+    await assert.rejects(setup(data).client.syncProjectContext(projectContext),
+      (error: unknown) => error instanceof BackendApiError && error.kind === 'invalid-response');
+  });
+}

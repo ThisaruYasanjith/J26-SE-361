@@ -63,3 +63,11 @@ class ProjectContext(ArchitectureModel):
     project_root: NonEmptyString
     components: list[ComponentInfo]
     relationships: list[RelationshipInfo]
+
+
+class ProjectContextSyncResponse(ArchitectureModel):
+    updated: bool
+    project_name: NonEmptyString
+    components: int = Field(ge=0)
+    relationships: int = Field(ge=0)
+    rag_invalidated: bool

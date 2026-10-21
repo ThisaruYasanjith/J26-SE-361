@@ -51,6 +51,32 @@ export interface ConflictItem { existing_rule_id: string; reason: string; }
 export interface ConflictResponse { has_conflict: boolean; duplicate: boolean; conflicts: ConflictItem[]; }
 export interface ApprovalResponse { approved: boolean; rule_id: string; conflicts_confirmed: boolean; duplicate: boolean; }
 
+// The extension checks the context header; the backend validates each component and relationship in full.
+export interface ProjectContext {
+  schema_version: '1.0';
+  project_name: string;
+  project_root: string;
+  components: unknown[];
+  relationships: unknown[];
+}
+export interface ProjectContextSyncResponse {
+  updated: boolean;
+  project_name: string;
+  components: number;
+  relationships: number;
+  rag_invalidated: boolean;
+}
+export function isProjectContext(value: unknown): value is ProjectContext {
+  return isRecord(value) && value.schema_version === '1.0' && typeof value.project_name === 'string' && !!value.project_name.trim()
+    && typeof value.project_root === 'string' && !!value.project_root.trim()
+    && Array.isArray(value.components) && Array.isArray(value.relationships);
+}
+export function isContextSyncResponse(value: unknown): value is ProjectContextSyncResponse {
+  return isRecord(value) && value.updated === true && value.rag_invalidated === true && typeof value.project_name === 'string'
+    && !!value.project_name.trim() && Number.isInteger(value.components) && (value.components as number) >= 0
+    && Number.isInteger(value.relationships) && (value.relationships as number) >= 0;
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
