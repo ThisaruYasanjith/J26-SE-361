@@ -36,7 +36,7 @@ async function panel(t: TestContext, initialMode = 'product') {
       navigableViolationIds: [exampleViolation.violation_id, second.violation_id] } as ConformanceState,
     canCheck: true, isRunning: false,
     subscribe: (listener: () => void) => { conformanceEvents.add(listener); return () => conformanceEvents.delete(listener); },
-    run: async () => { throw new Error('An editor change must not request conformance'); },
+    run: async (): Promise<void> => { throw new Error('An editor change must not request conformance'); },
     navigate: async (id: string) => { navigated.push(id); return true; },
     invalidate: () => { invalidations++; },
   };
@@ -269,3 +269,24 @@ test('switching modes while awaiting inline confirmation cancels without saving'
   assert.ok(host.allMessages.some(item => item.type === 'cancelled'));
   assert.equal(requests.filter(item => item.url.endsWith('/rules/approve')).length, 0);
 });
+
+for (const mode of ['product', 'developer']) {
+  test(mode + ' host accepts eligible conformance while rule generation is pending', async t => {
+    let finishGeneration: (response: Response) => void = () => {};
+    t.mock.method(globalThis, 'fetch', async () => new Promise<Response>(resolve => { finishGeneration = resolve; }));
+    const host = await panel(t, mode);
+    let checks = 0;
+    host.conformance.run = async () => { checks++; };
+    const generation = host.receive({ type: 'generate', requirement: 'Deny access.' });
+    try {
+      await host.receive({ type: 'checkConformance' });
+      assert.equal(checks, 1);
+      host.conformance.canCheck = false;
+      await host.receive({ type: 'checkConformance' });
+      assert.equal(checks, 1, 'actual conformance prerequisites still apply');
+    } finally {
+      finishGeneration(new Response(JSON.stringify(generated), { headers: { 'Content-Type': 'application/json' } }));
+      await generation;
+    }
+  });
+}

@@ -3,6 +3,7 @@ import { BackendApiError, BackendLogger, ConformanceBackend, friendlyError } fro
 import { ConformanceResponse } from './contracts';
 import { ProjectContextSyncWorkflow } from './contextSyncWorkflow';
 import { ConformanceDiagnostics } from './conformanceSources';
+import { canCheckConformance } from './conformanceEligibility';
 
 export type ConformanceState = { status: 'not-checked' | 'stale' | 'checking' | 'cancelled'; message?: string }
   | { status: 'failed'; message: string }
@@ -32,15 +33,19 @@ export class ConformanceWorkflow {
       if (state !== previous) {
         this.synchronizedUrl = state.status === 'synchronized' ? this.configuredUrl() : undefined;
         this.invalidate('Project context changed. Check conformance after synchronization.');
+      } else {
+        // Sync also emits after clearing its active promise. Refresh eligibility without invalidating again.
+        this.update(this.state);
       }
       previous = state;
     });
   }
   get isRunning(): boolean { return !!this.active || this.state.status === 'checking'; }
   get canCheck(): boolean {
-    return !this.disposed && !this.isRunning && this.analysis.state.status === 'succeeded'
-      && this.sync.state.status === 'synchronized' && !this.sync.isRunning
+    const synchronizedProject = !this.disposed && this.analysis.state.status === 'succeeded'
+      && this.sync.state.status === 'synchronized'
       && !!this.synchronizedUrl && this.synchronizedUrl === this.configuredUrl();
+    return canCheckConformance(synchronizedProject, this.sync.isRunning, this.isRunning);
   }
   private configuredUrl(): string | undefined {
     try { return this.backend.baseUrl; } catch { return undefined; }

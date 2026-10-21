@@ -108,6 +108,23 @@ test('re-sync and rule approval invalidate previous conformance', async t => {
   assert.equal(workflow.state.status, 'stale');
   assert.deepEqual(sink.entries, []);
 });
+
+test('re-sync publishes enabled eligibility after its active promise clears, without another invalidation', async t => {
+  const { workflow, analysis, sync, calls } = await setup(t);
+  await workflow.run();
+  await analysis.run();
+  assert.equal(workflow.canCheck, false);
+  const notifications: { enabled: boolean; syncing: boolean; state: unknown }[] = [];
+  workflow.subscribe(state => notifications.push({ enabled: workflow.canCheck, syncing: sync.isRunning, state }));
+  await sync.run();
+  assert.equal(workflow.state.status, 'stale');
+  assert.ok(notifications.some(item => item.syncing && !item.enabled));
+  assert.equal(notifications.at(-1)?.enabled, true);
+  assert.equal(notifications.at(-1)?.syncing, false);
+  assert.equal(notifications.at(-1)?.state, notifications.at(-2)?.state);
+  await workflow.run();
+  assert.equal(calls(), 2);
+});
 for (const [label, change] of [
   ['missing location', { start_line: undefined, end_line: undefined }], ['invalid location', { start_line: -1 }],
   ['missing file', { file_path: 'gone.java' }], ['traversal', { file_path: '../../outside.java' }],

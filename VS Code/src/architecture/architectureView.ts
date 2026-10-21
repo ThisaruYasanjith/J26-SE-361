@@ -1,3 +1,5 @@
+import { canCheckConformance } from './conformanceEligibility';
+
 export const analysisFormHtml = `
   <section class="issue-card project-card" aria-labelledby="analysis-heading">
     <div class="section-heading"><span class="step-label">01 / Project</span><h2 id="analysis-heading">Project Architecture</h2></div>
@@ -133,6 +135,7 @@ export const architectureStyles = `
 `;
 
 export const ruleWebviewScript = `
+  const conformanceEligible = (${canCheckConformance.toString()});
   const vscode = acquireVsCodeApi();
   const input = document.getElementById('requirement');
   const generate = document.getElementById('generate');
@@ -167,7 +170,7 @@ export const ruleWebviewScript = `
     approve.disabled = busy || analysisBusy || syncBusy || conformanceBusy || !canApprove;
     scan.disabled = busy || analysisBusy || syncBusy || conformanceBusy;
     sync.disabled = busy || analysisBusy || syncBusy || conformanceBusy || !canSync;
-    checkConformance.disabled = busy || analysisBusy || syncBusy || conformanceBusy || !canCheck;
+    checkConformance.disabled = !conformanceEligible(canCheck, analysisBusy, syncBusy, conformanceBusy);
     confirmApproval.disabled = busy || analysisBusy || syncBusy || conformanceBusy || !canApprove || !hasConflicts;
     cancelConflict.disabled = busy || !hasConflicts;
   }
@@ -268,7 +271,7 @@ export const ruleWebviewScript = `
     vscode.postMessage({ type: 'sync' });
   });
   checkConformance.addEventListener('click', () => {
-    if (busy || analysisBusy || syncBusy || conformanceBusy || !canCheck) { return; }
+    if (!conformanceEligible(canCheck, analysisBusy, syncBusy, conformanceBusy)) { return; }
     conformanceBusy = true;
     conformanceStatus.textContent = 'Architecture conformance: checking...';
     badge('conformance-badge', 'Conformance: Checking');

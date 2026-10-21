@@ -5,6 +5,10 @@ import { productFormHtml, productStyles, productWebviewScript } from '../../arch
 import { violationSummary } from '../../architecture/architecturePresentation';
 import { conformanceResponse, exampleViolation } from './conformanceFixtures';
 import { groupViolations } from '../../architecture/violationGrouping';
+import { ruleWebviewScript } from '../../architecture/architectureView';
+import { ProjectAnalysisWorkflow } from '../../architecture/analysisWorkflow';
+import { ProjectContextSyncWorkflow } from '../../architecture/contextSyncWorkflow';
+import { ConformanceWorkflow } from '../../architecture/conformanceWorkflow';
 
 class Element {
   textContent = ''; value = ''; className = ''; hidden = false; disabled = false; type = ''; focused = false;
@@ -21,20 +25,22 @@ class Element {
 }
 function descendants(item: Element): Element[] { return [item, ...item.children.flatMap(descendants)]; }
 function text(item: Element): string { return descendants(item).map(node => node.textContent).join('\n'); }
-function view() {
+function view(includeDeveloper = false) {
   const elements = new Map<string, Element>();
   const element = (id: string) => {
     if (!elements.has(id)) { elements.set(id, new Element()); }
     return elements.get(id)!;
   };
   const sent: Record<string, unknown>[] = [];
-  let receive = (_event: unknown) => {};
-  runInNewContext(productWebviewScript, {
+  const receivers: ((event: unknown) => void)[] = [];
+  const api = { postMessage: (message: unknown) => sent.push(JSON.parse(JSON.stringify(message))) };
+  runInNewContext(includeDeveloper ? ruleWebviewScript + productWebviewScript : productWebviewScript, {
     document: { getElementById: element, createElement: (tag: string) => new Element(tag) },
-    window: { addEventListener: (_name: string, callback: typeof receive) => { receive = callback; } },
-    vscode: { postMessage: (message: unknown) => sent.push(JSON.parse(JSON.stringify(message))) },
+    window: { addEventListener: (_name: string, callback: (event: unknown) => void) => { receivers.push(callback); } },
+    vscode: api, acquireVsCodeApi: () => api,
   });
-  return { element, sent, receive: (data: unknown) => receive({ data }),
+  if (includeDeveloper) { assert.deepEqual(sent.shift(), { type: 'ready' }); }
+  return { element, sent, receive: (data: unknown) => { for (const receive of receivers) { receive({ data }); } },
     button: (label: string) => descendants(element('product-conversation')).find(item => item.tag === 'button' && item.textContent === label)! };
 }
 const envelope = { status: 'VALID', reason_code: null, rule: {
@@ -287,3 +293,72 @@ test('product layout wraps at narrow widths and uses theme variables', () => {
   assert.match(productStyles, /appearance: none/);
   assert.doesNotMatch(productStyles, /#[0-9a-fA-F]{3,8}\b|https?:\/\//);
 });
+
+for (const customRules of [false, true]) {
+  test('both UIs enable conformance after analysis/sync and re-sync, independent of chat; custom rules: ' + customRules, async t => {
+    const host = view(true);
+    const summary = { projectName: 'payments', projectRoot: '/payments', contextPath: '/payments/.architecture/project_context.json', componentCount: 1, relationshipCount: 0 };
+    const analysis = new ProjectAnalysisWorkflow({ analyze: async () => summary }, {
+      folders: () => [{ name: 'payments', fsPath: '/payments', scheme: 'file' }], choose: async folders => folders[0],
+      progress: task => task(), showError() {},
+    });
+    const logger = { appendLine() {} };
+    const sync = new ProjectContextSyncWorkflow(analysis, {
+      baseUrl: 'https://backend.example', syncProjectContext: async () => ({ updated: true, project_name: 'payments', components: 1, relationships: 0, rag_invalidated: true }),
+    }, logger, async () => ({ schema_version: '1.0', project_name: 'payments', project_root: '.', components: [{}], relationships: [] }));
+    let checks = 0;
+    const violations = customRules ? [{ ...exampleViolation, rule_id: 'CUSTOM_001' }] : [exampleViolation];
+    const conformance = new ConformanceWorkflow(analysis, sync, {
+      baseUrl: 'https://backend.example', checkConformance: async () => { checks++; return conformanceResponse(violations); },
+    }, { clear() {}, prepare: async () => [], replace() {}, open: async () => false }, logger);
+    const sendConformance = () => host.receive({ type: 'conformance', state: conformance.state,
+      canCheck: conformance.canCheck, checking: conformance.isRunning,
+      displaySummary: conformance.state.status === 'checked' ? violationSummary(conformance.state.result) : undefined });
+    const sendSync = () => host.receive({ type: 'contextSync', state: sync.state, canSync: sync.canSync, syncing: sync.isRunning });
+    analysis.subscribe(state => host.receive({ type: 'analysis', state }));
+    conformance.subscribe(sendConformance);
+    let previousSync = sync.state;
+    sync.subscribe(state => {
+      if (state.status === 'synchronized' && state !== previousSync) { host.receive({ type: 'contextChanged' }); }
+      previousSync = state; sendSync();
+    });
+    t.after(() => { conformance.dispose(); sync.dispose(); analysis.dispose(); });
+    const expectEnabled = (enabled: boolean) => {
+      assert.equal(host.element('product-check').disabled, !enabled, 'product eligibility');
+      assert.equal(host.element('check-conformance').disabled, !enabled, 'developer eligibility');
+    };
+    sendConformance(); sendSync();
+    expectEnabled(false);
+    await analysis.run(); expectEnabled(false);
+    host.receive({ type: 'approvedRules', rules: customRules ? [{ ...envelope, rule_id: 'CUSTOM_001' }] : [] });
+    const cachedRules = text(host.element('product-approved-list'));
+    await sync.run(); expectEnabled(true);
+    assert.equal(checks, 0, 'sync never runs conformance implicitly');
+    // A pending generation and its later interpretation must not gate conformance in either UI.
+    host.receive({ type: 'busy', busy: true });
+    host.receive({ type: 'generationStarted', requirement: 'Only PaymentService may depend on PaymentGateway.' });
+    expectEnabled(true);
+    host.element('check-conformance').fire('click');
+    assert.deepEqual(host.sent.at(-1), { type: 'checkConformance' });
+    await conformance.run(); expectEnabled(true);
+    host.receive(proposal); expectEnabled(true);
+    host.receive({ type: 'approved', approval: { duplicate: true, rule_id: 'CUSTOM_001' } });
+    host.receive({ type: 'busy', busy: false }); expectEnabled(true);
+    await analysis.run(); expectEnabled(false);
+    assert.equal(sync.state.status, 'not-synchronized');
+    assert.equal(conformance.state.status, 'stale');
+    assert.equal(host.element('violation-list').children.length, 0);
+    // No generation/proposal/approval message occurs between re-analysis, re-sync and the next check.
+    await sync.run(); expectEnabled(true);
+    assert.equal(conformance.state.status, 'stale');
+    assert.equal(text(host.element('product-approved-list')), cachedRules);
+    host.receive({ type: 'uiMode', mode: 'developer' }); expectEnabled(true);
+    host.receive({ type: 'uiMode', mode: 'product' }); expectEnabled(true);
+    host.element('product-check').fire('click');
+    assert.deepEqual(host.sent.at(-1), { type: 'checkConformance' });
+    const pendingCheck = conformance.run();
+    expectEnabled(false);
+    await pendingCheck; expectEnabled(true);
+    assert.equal(checks, 2);
+  });
+}

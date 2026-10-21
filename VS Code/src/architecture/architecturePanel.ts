@@ -110,8 +110,11 @@ export class ArchitecturePanel {
         return;
       }
       if (message.type === 'clearConformance') { conformance.clear(); return; }
+      if (message.type === 'checkConformance') {
+        if (conformance.canCheck) { await conformance.run(); }
+        return;
+      }
       if (busy || contextSync.isRunning || conformance.isRunning) { return; }
-      if (message.type === 'checkConformance') { await conformance.run(); return; }
       if (message.type === 'scan') { await analysis.run(); return; }
       if (message.type === 'sync') {
         await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,

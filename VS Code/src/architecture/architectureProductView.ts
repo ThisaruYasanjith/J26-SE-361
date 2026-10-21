@@ -1,3 +1,5 @@
+import { canCheckConformance } from './conformanceEligibility';
+
 export const productFormHtml = `
   <div id="product-ui">
     <header class="product-header">
@@ -182,6 +184,7 @@ export const productStyles = `
 
 export const productWebviewScript = `
 (() => {
+  const conformanceEligible = (${canCheckConformance.toString()});
   const byId = id => document.getElementById('product-' + id);
   const post = message => productApi.postMessage(message);
   const productApi = vscode;
@@ -201,7 +204,7 @@ export const productWebviewScript = `
     byId('generate').disabled = working;
     byId('scan').disabled = working;
     byId('sync-action').disabled = working || !canSync;
-    byId('check').disabled = working || !canCheck;
+    byId('check').disabled = !conformanceEligible(canCheck, analysisBusy, syncing, checking);
     for (const button of actions) { button.disabled = working || !canApprove; }
     for (const button of conflictActions) { button.disabled = !awaitingConflict; }
   }
