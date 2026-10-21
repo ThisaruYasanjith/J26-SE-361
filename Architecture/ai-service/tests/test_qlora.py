@@ -126,15 +126,33 @@ def test_peft_failure_never_publishes_or_uses_base_instead(adapter, model_librar
     assert model_libraries.generated == []
 
 
-def test_adapter_tokenizer_is_used_locally_and_not_replaced_on_failure(adapter, model_libraries, peft_library):
-    (adapter / "tokenizer_config.json").write_text("{}", encoding="utf-8")
-    QwenModelService(adapter_path=adapter).generate([])
-    assert model_libraries.tokenizers[0] == (str(adapter), {"trust_remote_code": False, "local_files_only": True})
-    calls = len(model_libraries.models)
-    model_libraries.transformers.AutoTokenizer.from_pretrained = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Incomplete saved tokenizer"))
-    with pytest.raises(InferenceError, match="QLoRA adapter"):
-        QwenModelService(adapter_path=adapter).generate([])
-    assert len(model_libraries.models) == calls
+def test_adapter_tokenizer_files_do_not_change_base_tokenizer_source(adapter, model_libraries, peft_library):
+    # Even broken adapter tokenizer metadata must not affect the deployed base tokenizer.
+    for filename in ("tokenizer_config.json", "tokenizer.json", "tokenizer.model", "vocab.json", "merges.txt",
+                     "special_tokens_map.json", "chat_template.jinja"):
+        (adapter / filename).write_text("incompatible saved tokenizer metadata", encoding="utf-8")
+    model = QwenModelService(adapter_path=adapter)
+    model.generate([])
+    model.generate([])
+    assert model_libraries.tokenizers == [(DEFAULT_MODEL_ID, {"trust_remote_code": False})]
+    assert len(peft_library.calls) == 1
+    assert peft_library.calls[0][1] == str(adapter.resolve())
+    assert peft_library.calls[0][2]["local_files_only"] is True
+    assert model.status().adapter_loaded
+
+
+@pytest.mark.parametrize("mode", ["BASE", "QLORA"])
+def test_tokenizer_uses_the_configured_base_model_in_both_modes(mode, adapter, model_libraries, peft_library):
+    model_id = "configured/base-qwen"
+    config_path = adapter / "adapter_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["base_model_name_or_path"] = model_id
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    model = QwenModelService(model_id, model_mode=mode, adapter_path=adapter if mode == "QLORA" else None)
+    model.generate([])
+    assert model_libraries.tokenizers == [(model_id, {"trust_remote_code": False})]
+    assert model_libraries.models[0][0] == model_id
+    assert len(peft_library.calls) == (1 if mode == "QLORA" else 0)
 
 
 def test_environment_modes_and_legacy_base_model_alias(monkeypatch, adapter):
