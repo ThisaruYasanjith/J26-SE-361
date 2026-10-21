@@ -312,6 +312,8 @@ export const ruleWebviewScript = `
   });
   window.addEventListener('message', event => {
     const message = event.data;
+    if (message.type === 'proposalCleared') { clearProposal(); }
+    if (message.type === 'generationStarted') { input.value = message.requirement; }
     if (message.type === 'backendStatus') {
       document.getElementById('backend-status').textContent = message.configured
         ? 'AI Backend: Configured' + (message.host ? ' · ' + message.host : '') : 'AI Backend: Configuration required';

@@ -17,6 +17,12 @@
     "configuration": {
       "title": "Architecture Governance",
       "properties": {
+        "architectureGovernance.uiMode": {
+          "type": "string",
+          "enum": ["product", "developer"],
+          "default": "product",
+          "description": "Product mode is for normal use and demos. Developer mode shows technical state and raw model output."
+        },
         "architectureGovernance.aiBackendUrl": {
           "type": "string",
           "default": "http://127.0.0.1:8000",
@@ -42,6 +48,10 @@
       ]
     },
     "commands": [
+      {
+        "command": "architectureGovernance.switchUiMode",
+        "title": "Architecture Governance: Switch UI Mode"
+      },
       {
         "command": "architectureGovernance.checkConformance",
         "title": "Architecture Governance: Check Architecture Conformance"
@@ -81,7 +91,7 @@
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vscode-test",
-    "test:architecture": "npm run compile-tests && node --test out/test/architecture/backendClient.unit.js out/test/architecture/ruleWorkflow.unit.js out/test/architecture/architectureView.unit.js out/test/architecture/analyzerRunner.unit.js out/test/architecture/analysisWorkflow.unit.js out/test/architecture/contextSyncWorkflow.unit.js out/test/architecture/conformanceWorkflow.unit.js out/test/architecture/conformanceSources.unit.js out/test/architecture/conformanceDiagnostics.unit.js out/test/architecture/violationGrouping.unit.js out/test/architecture/architecturePanel.unit.js",
+    "test:architecture": "npm run compile-tests && node --test out/test/architecture/backendClient.unit.js out/test/architecture/ruleWorkflow.unit.js out/test/architecture/architectureView.unit.js out/test/architecture/analyzerRunner.unit.js out/test/architecture/analysisWorkflow.unit.js out/test/architecture/contextSyncWorkflow.unit.js out/test/architecture/conformanceWorkflow.unit.js out/test/architecture/conformanceSources.unit.js out/test/architecture/conformanceDiagnostics.unit.js out/test/architecture/violationGrouping.unit.js out/test/architecture/architecturePanel.unit.js out/test/architecture/architectureProductView.unit.js out/test/architecture/architecturePresentation.unit.js",
     "test:analyzer-integration": "npm run compile-tests && node --test out/test/architecture/analyzerRunner.integration.js"
   },
   "devDependencies": {

@@ -70,6 +70,16 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register commands to open each full window panel
   context.subscriptions.push(
+    vscode.commands.registerCommand("architectureGovernance.switchUiMode", async () => {
+      const mode = await vscode.window.showQuickPick([
+        { label: 'Product', description: 'Normal use and demos', mode: 'product' },
+        { label: 'Developer', description: 'Technical state and raw output', mode: 'developer' },
+      ], { title: 'Architecture Governance UI mode' });
+      if (mode) {
+        await vscode.workspace.getConfiguration('architectureGovernance').update('uiMode', mode.mode,
+          vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global);
+      }
+    }),
     vscode.commands.registerCommand("analyzer.openArchitecture", () => {
       ArchitecturePanel.show(context, architectureOutput, analysis, contextSync, conformance);
     }),

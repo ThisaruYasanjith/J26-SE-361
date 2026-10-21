@@ -14,7 +14,7 @@ import { ActiveEditorDocument, ViolationGroups } from '../../architecture/violat
 import { conformanceResponse, exampleViolation } from './conformanceFixtures';
 
 interface ViewMessage { type: string; state: ConformanceState; activeFile?: { filePath: string }; violationGroups?: ViolationGroups; }
-async function panel(t: TestContext) {
+async function panel(t: TestContext, initialMode = 'product') {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'architecture-panel-editor-'));
   await fs.mkdir(path.join(root, 'src'));
   for (const name of ['Example.java', 'Other.java', 'Clean.java']) { await fs.writeFile(path.join(root, 'src', name), 'class Example {}'); }
@@ -22,6 +22,11 @@ async function panel(t: TestContext) {
   const editorEvents = new Set<() => void>();
   const configurationEvents = new Set<(event: { affectsConfiguration: (section: string) => boolean }) => void>();
   let backendUrl = 'http://127.0.0.1:8000';
+  let uiMode = initialMode;
+  const allMessages: Record<string, unknown>[] = [];
+  const messageWaiters = new Map<string, (message: unknown) => void>();
+  const remembered = new Map<string, unknown>();
+  let invalidations = 0, nativeConfirmations = 0;
   const backendMessages: { configured: boolean; host?: string }[] = [];
   const conformanceEvents = new Set<() => void>();
   const navigated: string[] = [];
@@ -33,6 +38,7 @@ async function panel(t: TestContext) {
     subscribe: (listener: () => void) => { conformanceEvents.add(listener); return () => conformanceEvents.delete(listener); },
     run: async () => { throw new Error('An editor change must not request conformance'); },
     navigate: async (id: string) => { navigated.push(id); return true; },
+    invalidate: () => { invalidations++; },
   };
   let receive: (message: unknown) => Promise<void> = async () => {};
   let onDispose = () => {};
@@ -46,6 +52,9 @@ async function panel(t: TestContext) {
     webview: {
       html: '', onDidReceiveMessage: (callback: typeof receive) => { receive = callback; return { dispose() {} }; },
       postMessage: async (message: ViewMessage) => {
+        allMessages.push(message as unknown as Record<string, unknown>);
+        messageWaiters.get(message.type)?.(message);
+        messageWaiters.delete(message.type);
         if (message.type === 'backendStatus') { backendMessages.push(message as unknown as { configured: boolean; host?: string }); }
         if (message.type !== 'conformance') { return true; }
         messages.push(message);
@@ -58,13 +67,16 @@ async function panel(t: TestContext) {
   };
   const api = {
     ViewColumn: { Beside: 2 },
+    ProgressLocation: { Notification: 15 },
     window: {
       activeTextEditor: editor(path.join(root, 'src', 'Example.java')) as { document: ActiveEditorDocument } | undefined,
       createWebviewPanel: () => webviewPanel,
+      withProgress: async (_options: unknown, task: () => Promise<void>) => task(),
+      showWarningMessage: async () => { nativeConfirmations++; return 'Approve anyway'; },
       onDidChangeActiveTextEditor: (callback: () => void) => { editorEvents.add(callback); return { dispose: () => editorEvents.delete(callback) }; },
     },
     workspace: {
-      getConfiguration: () => ({ get: () => backendUrl }),
+      getConfiguration: () => ({ get: (key: string, fallback: unknown) => key === 'uiMode' ? uiMode : key === 'aiBackendUrl' ? backendUrl : fallback }),
       onDidChangeConfiguration: (callback: (event: { affectsConfiguration: (section: string) => boolean }) => void) => {
         configurationEvents.add(callback); return { dispose: () => configurationEvents.delete(callback) };
       },
@@ -74,7 +86,8 @@ async function panel(t: TestContext) {
   const actualRequire = createRequire(modulePath);
   const exports = {} as typeof import('../../architecture/architecturePanel');
   runInNewContext(readFileSync(modulePath, 'utf8'), { exports, URL, require: (name: string) => name === 'vscode' ? api : actualRequire(name) });
-  const context = { subscriptions: [] } as unknown as vscode.ExtensionContext;
+  const context = { subscriptions: [], workspaceState: { get: (key: string) => remembered.get(key),
+    update: async (key: string, value: unknown) => { remembered.set(key, value); } } } as unknown as vscode.ExtensionContext;
   const analysis = { state: { status: 'succeeded', summary: { projectRoot: root } }, subscribe: () => () => {} } as unknown as ProjectAnalysisWorkflow;
   const sync = { state: { status: 'synchronized' }, isRunning: false, canSync: true, subscribe: () => () => {} } as unknown as ProjectContextSyncWorkflow;
   exports.ArchitecturePanel.show(context, { appendLine() {} } as unknown as vscode.OutputChannel, analysis, sync,
@@ -95,8 +108,14 @@ async function panel(t: TestContext) {
       callback({ affectsConfiguration: section => section === 'architectureGovernance.aiBackendUrl' });
     }
   };
+  const configureMode = (mode: string) => {
+    uiMode = mode;
+    for (const callback of configurationEvents) { callback({ affectsConfiguration: section => section === 'architectureGovernance.uiMode' }); }
+  };
   return { root, conformance, conformanceEvents, messages, navigated, editorEvents, configurationEvents,
-    backendMessages, configureBackend, next, activate,
+    backendMessages, configureBackend, configureMode, allMessages, remembered, next, activate,
+    html: () => webviewPanel.webview.html, invalidations: () => invalidations, nativeConfirmations: () => nativeConfirmations,
+    nextType: (type: string) => new Promise(resolve => messageWaiters.set(type, resolve)),
     receive: (message: unknown) => receive(message), dispose: () => webviewPanel.dispose() };
 }
 
@@ -162,4 +181,91 @@ test('backend configuration display publishes only the hostname and updates with
   host.configureBackend('invalid URL');
   assert.equal(host.backendMessages.at(-1)?.configured, false);
   assert.equal(host.backendMessages.at(-1)?.host, undefined);
+});
+
+test('both UI modes use one panel and switching keeps host state with a local refresh', async t => {
+  const host = await panel(t);
+  assert.match(host.html(), /id="developer-ui" hidden/);
+  assert.match(host.html(), /id="product-ui">/);
+  assert.doesNotMatch(host.html(), /cdn\.jsdelivr|<link|<script[^>]+src=/);
+  const originalHtml = host.html();
+  host.configureMode('developer');
+  assert.equal(host.allMessages.at(-1)?.mode, 'developer');
+  host.configureMode('product');
+  assert.equal(host.allMessages.at(-1)?.mode, 'product');
+  assert.equal(host.html(), originalHtml);
+  assert.equal(host.conformance.state.status, 'checked');
+});
+
+test('developer setting initially renders the preserved technical UI', async t => {
+  const host = await panel(t, 'developer');
+  assert.match(host.html(), /id="product-ui" hidden/);
+  assert.match(host.html(), /id="developer-ui">/);
+  assert.match(host.html(), /id="raw-output" hidden/);
+  assert.match(host.html(), /Generated output/);
+});
+
+const generated = { generated_text: 'unchanged model output', json_valid: true, schema_valid: true, validation_errors: [], retrieved_context: [],
+  rule: { status: 'VALID', reason_code: null, rule: { rule_type: 'COMPONENT_ACCESS',
+    source: { entity_type: 'COMPONENT', name: 'PaymentService' }, target: { entity_type: 'COMPONENT', name: 'PaymentGateway' },
+    relationship: 'DEPENDS_ON', action: 'ONLY', scope: { type: 'PROJECT', value: null }, is_exception: false } } };
+
+function mockRuleRequests(t: TestContext, conflict = false) {
+  const requests: { url: string; body: unknown }[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+    requests.push({ url, body: JSON.parse(options.body as string) });
+    const data = url.endsWith('/rules/generate') ? generated : url.endsWith('/rules/check-conflicts')
+      ? { has_conflict: conflict, duplicate: false, conflicts: conflict ? [{ existing_rule_id: 'CUSTOM_002', reason: 'Opposing actions' }] : [] }
+      : { approved: true, rule_id: 'CUSTOM_001', conflicts_confirmed: conflict, duplicate: false };
+    return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
+  });
+  return requests;
+}
+
+test('successful backend approvals update the shared display cache without a listing API', async t => {
+  const requests = mockRuleRequests(t), host = await panel(t);
+  await host.receive({ type: 'generate', requirement: 'Only PaymentService may depend on PaymentGateway.' });
+  assert.ok(host.allMessages.some(item => item.type === 'generationStarted'));
+  await host.receive({ type: 'approve' });
+  const catalog = host.allMessages.filter(item => item.type === 'approvedRules').at(-1)?.rules as { rule_id: string }[];
+  assert.equal(catalog[0].rule_id, 'CUSTOM_001');
+  assert.equal(host.invalidations(), 1);
+  assert.deepEqual(requests.map(item => new URL(item.url).pathname), ['/rules/generate', '/rules/check-conflicts', '/rules/approve']);
+  host.configureMode('developer');
+  assert.equal(host.remembered.size, 1);
+  host.configureBackend('https://other.example');
+  assert.deepEqual(JSON.parse(JSON.stringify(host.allMessages.filter(item => item.type === 'approvedRules').at(-1)?.rules)), []);
+});
+
+for (const confirmed of [true, false]) {
+  test('product conflict confirmation stays inside the existing workflow: ' + confirmed, async t => {
+    const requests = mockRuleRequests(t, true), host = await panel(t);
+    await host.receive({ type: 'generate', requirement: 'Deny access.' });
+    const conflicted = host.nextType('conflicts');
+    const pending = host.receive({ type: 'approve' });
+    await conflicted;
+    await host.receive({ type: 'confirmConflict', confirmed });
+    await pending;
+    assert.equal(host.nativeConfirmations(), 0);
+    const saved = requests.filter(item => item.url.endsWith('/rules/approve'));
+    assert.equal(saved.length, confirmed ? 1 : 0);
+    if (confirmed) { assert.equal((saved[0].body as { confirm_conflicts: boolean }).confirm_conflicts, true); }
+    else { assert.equal(host.remembered.size, 0); }
+  });
+}
+
+test('developer conflict confirmation still uses the native modal', async t => {
+  mockRuleRequests(t, true); const host = await panel(t, 'developer');
+  await host.receive({ type: 'generate', requirement: 'Deny access.' });
+  await host.receive({ type: 'approve' });
+  assert.equal(host.nativeConfirmations(), 1);
+});
+
+test('switching modes while awaiting inline confirmation cancels without saving', async t => {
+  const requests = mockRuleRequests(t, true), host = await panel(t);
+  await host.receive({ type: 'generate', requirement: 'Deny access.' });
+  const conflicted = host.nextType('conflicts'), pending = host.receive({ type: 'approve' });
+  await conflicted; host.configureMode('developer'); await pending;
+  assert.ok(host.allMessages.some(item => item.type === 'cancelled'));
+  assert.equal(requests.filter(item => item.url.endsWith('/rules/approve')).length, 0);
 });
