@@ -22,10 +22,7 @@ from transformers import AutoTokenizer, T5ForConditionalGeneration
 
 from src.method_parser import MethodParser
 from src.signature_checker import SignatureChecker
-from src.llm_analyzer import BehavioralFingerprint, map_categories_to_fingerprint
-from src.drift_engine import BehavioralDriftEngine
-from src.impact_assessor import ImpactAssessor
-from src.explanation import ExplanationGenerator
+from src.ai_explainer import generate_ai_body_comparison
 
 # Configure logging
 logging.basicConfig(
@@ -587,16 +584,14 @@ def analyze(request: AnalyzeRequest):
     )
 
 
-@app.post("/analyze_pipeline", summary="Execute Complete 6-Stage Behavioral Drift Analysis Pipeline")
+@app.post("/analyze_pipeline", summary="Execute Behavioral Analysis Pipeline")
 def analyze_pipeline(request: AnalyzeRequest):
     """
-    Executes the complete end-to-end behavioral governance pipeline:
+    Executes the behavioral governance pipeline:
     - Stage 1: Java AST Method Parsing
     - Stage 2: Same-Signature Verification
     - Stage 3: Fine-Tuned CodeT5 Behavioral Categories & Body Extraction
-    - Stage 4: Multi-Dimensional Behavioral Drift Metrics
-    - Stage 5: Impact & Architectural Blast Radius Assessment
-    - Stage 6: Developer Guidance & JUnit Regression Test Generation
+    - Stage 4: Developer Guidance & JUnit Regression Test Generation
     """
     old_code = request.old_method.strip()
     new_code = request.new_method.strip()
@@ -639,9 +634,7 @@ def analyze_pipeline(request: AnalyzeRequest):
             "status": "signature_mismatch",
             "stage2_signature": stage2_data,
             "stage3_categories": None,
-            "stage4_drift": None,
-            "stage5_impact": None,
-            "stage6_guidance": None,
+            "stage4_guidance": None,
         }
 
     # Stage 3: CodeT5 inference for behavioral categories and extracted bodies
@@ -711,79 +704,76 @@ def analyze_pipeline(request: AnalyzeRequest):
         "raw_output": raw_output,
     }
 
-    # Stage 4: Behavioral Drift Engine
-    fp1 = map_categories_to_fingerprint(
+    # Stage 4: Developer Guidance & JUnit Regression Test Generation (AI Method Body Comparison)
+    added = comparison.added_categories
+    removed = comparison.removed_categories
+
+    guidance_lines = []
+    if added:
+        guidance_lines.append(f"New behavioral categories introduced: {', '.join(added)}.")
+    if removed:
+        guidance_lines.append(f"Behavioral categories removed: {', '.join(removed)}.")
+    if not added and not removed:
+        guidance_lines.append("No behavioral category changes detected between baseline and modified methods.")
+
+    junit_tests = []
+    for cat in added:
+        if cat == "EXCEPTION_BEHAVIOR":
+            junit_tests.append(
+                "@Test\nvoid testModifiedMethodDoesNotThrowUnexpectedly() {\n    assertDoesNotThrow(() -> sut.METHOD_NAME(VALID_ARGS));\n}"
+            )
+        elif cat == "DATABASE_WRITE":
+            junit_tests.append(
+                "@Test\nvoid testModifiedMethodPersistsRecord() {\n    sut.METHOD_NAME(ARGS);\n    verify(repository, times(1)).save(any());\n}"
+            )
+        elif cat == "STATE_MUTATION":
+            junit_tests.append(
+                "@Test\nvoid testModifiedMethodMutatesState() {\n    sut.METHOD_NAME(ARGS);\n    assertEquals(EXPECTED_STATE, sut.getState());\n}"
+            )
+        elif cat == "FILE_OPERATION":
+            junit_tests.append(
+                "@Test\nvoid testModifiedMethodFileOperation() {\n    sut.METHOD_NAME(ARGS);\n    assertTrue(Files.exists(expectedPath));\n}"
+            )
+        elif cat == "EXTERNAL_CALL":
+            junit_tests.append(
+                "@Test\nvoid testModifiedMethodCallsExternalService() {\n    sut.METHOD_NAME(ARGS);\n    verify(externalClient, times(1)).send(any());\n}"
+            )
+
+    ai_comparison = generate_ai_body_comparison(
+        old_body=validated["old_method"]["method_body"],
+        new_body=validated["new_method"]["method_body"],
+        old_categories=validated["old_method"]["categories"],
+        new_categories=validated["new_method"]["categories"],
+        added_categories=added,
+        removed_categories=removed,
+        retained_categories=comparison.retained_categories,
         method_name=v1_parsed.name,
-        categories=validated["old_method"]["categories"],
-        method_body=validated["old_method"]["method_body"],
-        raw_output=raw_output,
+        signature_str=v1_parsed.signature_str,
     )
-    fp2 = map_categories_to_fingerprint(
-        method_name=v2_parsed.name,
-        categories=validated["new_method"]["categories"],
-        method_body=validated["new_method"]["method_body"],
-        raw_output=raw_output,
-    )
-
-    drift_engine = BehavioralDriftEngine()
-    drift_report = drift_engine.analyze(fp1, fp2)
-
-    dimension_deltas_data = [
-        {
-            "dimension": d.dimension,
-            "weight": d.weight,
-            "has_drift": d.has_drift,
-            "added_behaviors": d.added_behaviors,
-            "removed_behaviors": d.removed_behaviors,
-            "similarity_score": d.similarity_score,
-        }
-        for d in drift_report.dimension_deltas
-    ]
 
     stage4_data = {
-        "drift_detected": drift_report.drift_detected,
-        "drift_score": drift_report.drift_score,
-        "drift_score_pct": round(drift_report.drift_score * 100, 1),
-        "severity": drift_report.severity.value,
-        "summary": drift_report.summary,
-        "flagged_drift_areas": drift_report.flagged_drift_areas,
-        "dimension_deltas": dimension_deltas_data,
-    }
-
-    # Stage 5: Impact & Architectural Blast Radius Assessment
-    assessor = ImpactAssessor()
-    vis_mod = " ".join(v1_parsed.modifiers)
-    impact = assessor.assess(sig_result, drift_report, visibility_modifier=vis_mod)
-
-    stage5_data = {
-        "risk_level": impact.risk_level.value,
-        "blast_radius": impact.blast_radius.value,
-        "backward_compatibility_intact": impact.backward_compatibility_intact,
-        "executive_summary": impact.executive_summary,
-        "silent_regression_risk": impact.silent_regression_risk,
-        "architectural_risks": impact.architectural_risks,
-        "recommended_mitigations": impact.recommended_mitigations,
-    }
-
-    # Stage 6: Developer Guidance & JUnit Regression Test Generation
-    explainer = ExplanationGenerator()
-    explanation = explainer.generate_explanation(v1_parsed, v2_parsed, sig_result, drift_report, impact)
-
-    stage6_data = {
-        "overview": explanation.overview,
-        "detailed_drift_breakdown": explanation.detailed_drift_breakdown,
-        "failure_scenarios": explanation.failure_scenarios,
-        "recommended_unit_tests": explanation.recommended_unit_tests,
-        "developer_guidance": explanation.developer_guidance,
+        "overview": ai_comparison.get("overview") or " ".join(guidance_lines),
+        "body_comparison_explanation": ai_comparison.get("body_comparison_explanation", ""),
+        "ai_source": ai_comparison.get("ai_source", "AI Engine"),
+        "detailed_drift_breakdown": f"Added: {added}. Removed: {removed}. Retained: {comparison.retained_categories}.",
+        "failure_scenarios": ai_comparison.get("failure_scenarios") or [
+            f"Callers unaware of new {c} behavior may experience silent regressions." for c in added
+        ],
+        "recommended_unit_tests": ai_comparison.get("recommended_unit_tests") or junit_tests,
+        "developer_guidance": ai_comparison.get("developer_guidance") or (
+            "Review callers of this method for assumptions about its side effects. "
+            "Add regression tests covering the newly introduced behavioral categories."
+            if added or removed else
+            "No behavioral drift detected. Existing test coverage remains adequate."
+        ),
     }
 
     return {
         "status": "success",
         "stage2_signature": stage2_data,
         "stage3_categories": stage3_data,
-        "stage4_drift": stage4_data,
-        "stage5_impact": stage5_data,
-        "stage6_guidance": stage6_data,
+        "stage4_guidance": stage4_data,
+        "stage6_guidance": stage4_data,
     }
 
 

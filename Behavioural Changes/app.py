@@ -3,10 +3,9 @@ Behavioral Drift Detection in Same-Signature Java Methods
 Streamlit Demonstration Dashboard
 
 Stage: UI Feedback & Governance Pipeline
-Integrates the complete local research pipeline:
+Integrates the local research pipeline:
 Java Method Input → Same-Signature Verification → Local CodeT5 Inference (Salesforce/codet5-small) →
-Behavioral Category Analysis → Behavioral Drift Engine → Impact Assessment →
-Developer Explanation & JUnit Generation → UI Feedback
+Behavioral Category Analysis → Developer Guidance & JUnit Generation → UI Feedback
 """
 
 import streamlit as st
@@ -20,9 +19,6 @@ from dotenv import load_dotenv
 from src.method_parser import MethodParser, JavaMethod
 from src.signature_checker import SignatureChecker, SignatureComparisonResult
 from src.llm_analyzer import LLMSemanticAnalyzer, BehavioralFingerprint
-from src.drift_engine import BehavioralDriftEngine, DriftReport, DriftSeverity
-from src.impact_assessor import ImpactAssessor, ImpactAssessment, RiskLevel
-from src.explanation import ExplanationGenerator, ExplanationReport
 
 # Load environment variables
 load_dotenv()
@@ -130,7 +126,6 @@ PRESET_CASES = {
     if (price <= 0) {
         return 0.0;
     }
-    // Drift: Tier boundary silently shifted from >=3 to >3, cutting tier 3 discount
     if (customerTier > 3) {
         return price * 0.20;
     }
@@ -145,7 +140,6 @@ PRESET_CASES = {
     return String.format("Order #%s : $%.2f", orderId, amount);
 }""",
         "v2": """public String formatOrderReceipt(String orderId, double amount) {
-    // Drift: Throws IllegalArgumentException instead of returning 'N/A'
     if (orderId == null) {
         throw new IllegalArgumentException("orderId cannot be null");
     }
@@ -163,7 +157,6 @@ PRESET_CASES = {
     if (token == null || token.isEmpty()) {
         return false;
     }
-    // Drift: Mutates the caller's input list directly and writes to external audit log
     permissions.add("AUDITED_SESSION");
     System.out.println("Session validated for token: " + token);
     return permissions.contains("ADMIN");
@@ -233,7 +226,7 @@ def main():
     ])
 
     with tab_analysis:
-        st.subheader("1. Java Method Input")
+        st.subheader("Java Method Input")
         col1, col2 = st.columns(2)
 
         with col1:
@@ -271,7 +264,7 @@ def main():
             sig_result = checker.check(v1_parsed, v2_parsed)
 
             st.markdown("---")
-            st.subheader("2. Same-Signature Verification Results")
+            st.subheader("Same-Signature Verification Results")
             if sig_result.is_same_signature:
                 st.success(f"✅ **Same-Signature Verified!** Both methods share signature: `{v1_parsed.signature_str}`")
             else:
@@ -294,7 +287,7 @@ def main():
                 return
 
             st.markdown("---")
-            st.subheader("3. Fine-Tuned CodeT5 Behavioral Categories & Extracted Bodies")
+            st.subheader("Fine-Tuned CodeT5 Behavioral Categories & Extracted Bodies")
 
             cat_col1, cat_col2 = st.columns(2)
             with cat_col1:
@@ -309,107 +302,59 @@ def main():
                 with st.expander("Extracted Modified Method Body"):
                     st.code(fp2.method_body if fp2.method_body else "/* empty body */", language="java")
 
-            # Category Deltas
-            st.markdown("##### 📊 Behavioral Category Changes (v1 → v2)")
-            d_col1, d_col2, d_col3 = st.columns(3)
-            with d_col1:
-                added = comparison.get("added_categories", [])
-                st.markdown(f"**➕ Added in v2 ({len(added)}):**")
-                st.markdown(render_badges(added, "cat-badge cat-added"), unsafe_allow_html=True)
-            with d_col2:
-                removed = comparison.get("removed_categories", [])
-                st.markdown(f"**➖ Removed from v1 ({len(removed)}):**")
-                st.markdown(render_badges(removed, "cat-badge cat-removed"), unsafe_allow_html=True)
-            with d_col3:
-                retained = comparison.get("retained_categories", [])
-                st.markdown(f"**🔁 Retained in Both ({len(retained)}):**")
-                st.markdown(render_badges(retained, "cat-badge cat-retained"), unsafe_allow_html=True)
-
-            # STAGE 5: Behavioral Drift Engine
-            pipeline_progress.write("Stage 5: Computing Multi-Dimensional Behavioral Drift Metrics...")
-            drift_engine = BehavioralDriftEngine()
-            drift_report = drift_engine.analyze(fp1, fp2)
+            # Stage 4: Developer Guidance
+            pipeline_progress.write("Synthesizing Developer Guidance & JUnit Regression Tests...")
 
             st.markdown("---")
-            st.subheader("4. Behavioral Drift Metrics")
-            m_col1, m_col2, m_col3 = st.columns(3)
-            with m_col1:
-                st.metric("Drift Score", f"{drift_report.drift_score * 100:.1f}%")
-            with m_col2:
-                st.metric("Drift Severity", drift_report.severity.value)
-            with m_col3:
-                st.metric("Drift Detected", "YES" if drift_report.drift_detected else "NO")
+            st.subheader("Developer Guidance & Regression Test Generation")
 
-            st.markdown(f"**Summary:** {drift_report.summary}")
-            if drift_report.flagged_drift_areas:
-                st.write("**Affected Behavioral Dimensions:**", ", ".join(drift_report.flagged_drift_areas))
+            # We use the local CodeT5 service response via LLMSemanticAnalyzer
+            # The guidance is derived from the category comparison already computed
+            added_cats = comparison.get("added_categories", [])
+            removed_cats = comparison.get("removed_categories", [])
 
-            with st.expander("Detailed Dimension Deltas"):
-                for delta in drift_report.dimension_deltas:
-                    status_icon = "⚠️" if delta.has_drift else "✔️"
-                    st.markdown(f"{status_icon} **{delta.dimension.upper()}** (weight: {delta.weight:.2f})")
-                    if delta.has_drift:
-                        if delta.added_behaviors:
-                            st.markdown(f"- *Added in v2:* `{', '.join(delta.added_behaviors)}`")
-                        if delta.removed_behaviors:
-                            st.markdown(f"- *Removed from v1:* `{', '.join(delta.removed_behaviors)}`")
-                    else:
-                        st.caption("No divergence detected in this dimension.")
+            if added_cats or removed_cats:
+                overview_parts = []
+                if added_cats:
+                    overview_parts.append(f"New behavioral categories introduced: {', '.join(added_cats)}.")
+                if removed_cats:
+                    overview_parts.append(f"Behavioral categories removed: {', '.join(removed_cats)}.")
+                st.info(f"**Overview:** {' '.join(overview_parts)}")
+            else:
+                st.info("**Overview:** No behavioral category changes detected between baseline and modified methods.")
 
-            # STAGE 6: Impact Assessment
-            pipeline_progress.write("Stage 6: Evaluating Architectural Impact & Blast Radius...")
-            assessor = ImpactAssessor()
-            vis_mod = " ".join(v1_parsed.modifiers)
-            impact = assessor.assess(sig_result, drift_report, visibility_modifier=vis_mod)
-
-            st.markdown("---")
-            st.subheader("5. Impact & Architectural Blast Radius Assessment")
-            i_col1, i_col2, i_col3 = st.columns(3)
-            with i_col1:
-                st.metric("Systemic Risk Level", impact.risk_level.value)
-            with i_col2:
-                st.metric("Blast Radius Scope", impact.blast_radius.value)
-            with i_col3:
-                st.metric("Backward Compatibility", "INTACT" if impact.backward_compatibility_intact else "COMPROMISED")
-
-            st.markdown(f"**Executive Impact Assessment:** {impact.executive_summary}")
-            st.markdown(f"**Silent Bug Vulnerability:** {impact.silent_regression_risk}")
-
-            if impact.architectural_risks:
-                st.markdown("##### 🚨 Architectural Risks:")
-                for r in impact.architectural_risks:
-                    st.markdown(f"- {r}")
-
-            if impact.recommended_mitigations:
-                st.markdown("##### 🛡️ Recommended Mitigations:")
-                for m in impact.recommended_mitigations:
-                    st.markdown(f"- {m}")
-
-            # STAGE 7: Developer Explanation & JUnit Tests
-            pipeline_progress.write("Stage 7: Synthesizing Developer Explanation & JUnit Regression Tests...")
-            explainer = ExplanationGenerator()
-            explanation = explainer.generate_explanation(v1_parsed, v2_parsed, sig_result, drift_report, impact)
-
-            st.markdown("---")
-            st.subheader("6. Developer Guidance & Regression Test Generation")
-            st.info(f"**Overview:** {explanation.overview}")
             st.markdown("##### 🔬 Technical Breakdown")
-            st.write(explanation.detailed_drift_breakdown)
+            st.write(f"Added: {added_cats}. Removed: {removed_cats}. Retained: {comparison.get('retained_categories', [])}.")
 
-            if explanation.failure_scenarios:
-                st.markdown("##### ⚡ Divergent Runtime Scenarios (Failure Modes):")
-                for s in explanation.failure_scenarios:
-                    st.markdown(f"- {s}")
+            if added_cats:
+                st.markdown("##### ⚡ Failure Scenarios:")
+                for cat in added_cats:
+                    st.markdown(f"- Callers unaware of new **{cat}** behavior may experience silent regressions.")
 
-            if explanation.recommended_unit_tests:
+            if added_cats:
                 st.markdown("##### 🧪 Suggested JUnit Tests to Guard Against Drift:")
-                for t in explanation.recommended_unit_tests:
-                    st.code(t, language="java")
+                for cat in added_cats:
+                    if cat == "EXCEPTION_BEHAVIOR":
+                        st.code("@Test\nvoid testModifiedMethodDoesNotThrowUnexpectedly() {\n    assertDoesNotThrow(() -> sut.METHOD_NAME(VALID_ARGS));\n}", language="java")
+                    elif cat == "DATABASE_WRITE":
+                        st.code("@Test\nvoid testModifiedMethodPersistsRecord() {\n    sut.METHOD_NAME(ARGS);\n    verify(repository, times(1)).save(any());\n}", language="java")
+                    elif cat == "STATE_MUTATION":
+                        st.code("@Test\nvoid testModifiedMethodMutatesState() {\n    sut.METHOD_NAME(ARGS);\n    assertEquals(EXPECTED_STATE, sut.getState());\n}", language="java")
+                    elif cat == "FILE_OPERATION":
+                        st.code("@Test\nvoid testModifiedMethodFileOperation() {\n    sut.METHOD_NAME(ARGS);\n    assertTrue(Files.exists(expectedPath));\n}", language="java")
+                    elif cat == "EXTERNAL_CALL":
+                        st.code("@Test\nvoid testModifiedMethodCallsExternalService() {\n    sut.METHOD_NAME(ARGS);\n    verify(externalClient, times(1)).send(any());\n}", language="java")
 
             st.markdown("##### 💡 Developer Guidance:")
-            st.write(explanation.developer_guidance)
+            if added_cats or removed_cats:
+                st.write(
+                    "Review callers of this method for assumptions about its side effects. "
+                    "Add regression tests covering the newly introduced behavioral categories."
+                )
+            else:
+                st.write("No behavioral drift detected. Existing test coverage remains adequate.")
 
-            pipeline_progress.update(label="Behavioral Drift Analysis Complete!", state="complete")
+            pipeline_progress.update(label="Behavioral Analysis Complete!", state="complete")
 
     with tab_evidence:
         st.subheader("📊 Empirical Model Accuracy & Evaluation Evidence")

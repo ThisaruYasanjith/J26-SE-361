@@ -509,11 +509,11 @@ export class BehaviouralPanel {
           <p id="errorMsg" style="font-size: 12px; margin: 6px 0 0 0;"></p>
         </div>
 
-        <!-- Section 2: Same-Signature Verification Results -->
+        <!-- Same-Signature Verification Results -->
         <div id="stage2Section" style="display: none; margin-bottom: 16px;">
           <div class="section-title">
             <i class="codicon codicon-verified"></i>
-            2. Same-Signature Verification Results
+            Same-Signature Verification Results
           </div>
           <div id="sigVerifiedCard" class="issue-card" style="display: none; background-color: rgba(30, 58, 47, 0.35); border-color: #2e6047;">
             <div style="display: flex; align-items: center; gap: 8px;">
@@ -537,11 +537,11 @@ export class BehaviouralPanel {
           </div>
         </div>
 
-        <!-- Stage 3: Fine-Tuned CodeT5 Behavioral Categories & Extracted Bodies -->
+        <!-- Fine-Tuned CodeT5 Behavioral Categories & Extracted Bodies -->
         <div id="resultsSection" style="display: none;">
           <div class="section-title">
             <i class="codicon codicon-symbol-class"></i>
-            3. Fine-Tuned CodeT5 Behavioral Categories & Extracted Bodies
+            Fine-Tuned CodeT5 Behavioral Categories & Extracted Bodies
           </div>
 
           <div class="grid-2">
@@ -588,80 +588,22 @@ export class BehaviouralPanel {
           </div>
           <div id="governanceAlerts" style="margin-bottom: 12px;"></div>
 
-          <!-- Stage 4: Behavioral Drift Metrics -->
-          <div class="section-title">
-            <i class="codicon codicon-graph"></i>
-            4. Behavioral Drift Metrics
-          </div>
-          <div class="grid-3" style="margin-bottom: 12px;">
-            <div class="stat-card">
-              <div class="stat-card-title">Drift Score</div>
-              <div class="stat-card-val" id="driftScoreVal">0.0%</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-card-title">Drift Severity</div>
-              <div class="stat-card-val"><span id="driftSeverityBadge" class="badge-none">NONE</span></div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-card-title">Drift Detected</div>
-              <div class="stat-card-val" id="driftDetectedVal">NO</div>
-            </div>
-          </div>
-
-          <div class="issue-card" style="margin-bottom: 12px;">
-            <p style="margin: 0 0 6px 0; font-size: 12px;"><strong>Summary:</strong> <span id="driftSummaryText">No drift detected.</span></p>
-            <div id="affectedDimensionsRow" style="display: none; font-size: 12px; margin-top: 6px;">
-              <strong>Affected Behavioral Dimensions:</strong> <span id="affectedDimensionsText" style="color: #f0ad4e;"></span>
-            </div>
-            <details class="method-body-expander" style="margin-top: 10px;">
-              <summary>Detailed Dimension Deltas</summary>
-              <div id="dimensionDeltasList" style="padding: 8px 10px;"></div>
-            </details>
-          </div>
-
-          <!-- Stage 5: Impact & Architectural Blast Radius Assessment -->
-          <div class="section-title">
-            <i class="codicon codicon-shield"></i>
-            5. Impact & Architectural Blast Radius Assessment
-          </div>
-          <div class="grid-3" style="margin-bottom: 12px;">
-            <div class="stat-card">
-              <div class="stat-card-title">Systemic Risk Level</div>
-              <div class="stat-card-val"><span id="riskLevelBadge" class="badge-none">NONE</span></div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-card-title">Blast Radius Scope</div>
-              <div class="stat-card-val" id="blastRadiusVal" style="font-size: 14px;">LOCAL</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-card-title">Backward Compatibility</div>
-              <div class="stat-card-val" id="backwardCompatVal" style="font-size: 14px; color: #4ade80;">INTACT</div>
-            </div>
-          </div>
-
-          <div class="issue-card" style="margin-bottom: 12px;">
-            <p style="margin: 0 0 6px 0; font-size: 12px;"><strong>Executive Impact Assessment:</strong> <span id="execSummaryText">None</span></p>
-            <p style="margin: 0 0 8px 0; font-size: 12px;"><strong>Silent Bug Vulnerability:</strong> <span id="silentRiskText">None</span></p>
-
-            <div id="archRisksSection" style="display: none; margin-top: 8px;">
-              <strong style="font-size: 12px; color: #f87171;">🚨 Architectural Risks:</strong>
-              <div id="archRisksList" style="margin-top: 4px; font-size: 12px;"></div>
-            </div>
-
-            <div id="mitigationsSection" style="display: none; margin-top: 8px;">
-              <strong style="font-size: 12px; color: #38bdf8;">🛡️ Recommended Mitigations:</strong>
-              <div id="mitigationsList" style="margin-top: 4px; font-size: 12px;"></div>
-            </div>
-          </div>
-
-          <!-- Stage 6: Developer Guidance & Regression Test Generation -->
+          <!-- Developer Guidance & Regression Test Generation -->
           <div class="section-title">
             <i class="codicon codicon-beaker"></i>
-            6. Developer Guidance & Regression Test Generation
+            Developer Guidance & Regression Test Generation
           </div>
 
           <div class="issue-card" style="margin-bottom: 12px; background: rgba(56, 189, 248, 0.08); border-color: #0284c7;">
             <p style="margin: 0; font-size: 12px;"><strong>Overview:</strong> <span id="guidanceOverviewText">None</span></p>
+          </div>
+
+          <!-- Method Body Behavioral Comparison Explanation -->
+          <div class="issue-card" style="margin-bottom: 12px;">
+            <div style="font-weight: 600; font-size: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+              <i class="codicon codicon-diff"></i> Method Body Behavioral Comparison
+            </div>
+            <div id="bodyComparisonText" style="font-size: 12px; line-height: 1.6; color: var(--vscode-foreground); white-space: pre-wrap;">No method body comparison available.</div>
           </div>
 
           <div class="issue-card" style="margin-bottom: 12px;">
@@ -934,128 +876,23 @@ export class BehaviouralPanel {
                 renderChips('removedChips', removedCats, 'cat-removed');
                 renderChips('retainedChips', retainedCats, 'cat-retained');
 
-                // Render Stage 4: Behavioral Drift Metrics
-                let s4 = data.stage4_drift;
-                if (!s4) {
-                  // Resilient fallback if backend returned partial pipeline
-                  const driftDetected = (addedCats.length > 0 || removedCats.length > 0);
-                  const totalCats = addedCats.length + removedCats.length + retainedCats.length;
-                  const score = totalCats > 0 ? (addedCats.length + removedCats.length) / totalCats : 0.0;
-                  s4 = {
-                    drift_detected: driftDetected,
-                    drift_score: score,
-                    drift_score_pct: Math.round(score * 1000) / 10,
-                    severity: score > 0.6 ? 'HIGH' : score > 0.3 ? 'MEDIUM' : score > 0 ? 'LOW' : 'NONE',
-                    summary: driftDetected ? ('Behavioral drift detected across ' + (addedCats.length + removedCats.length) + ' category changes.') : 'No behavioral drift detected.',
-                    flagged_drift_areas: [...addedCats, ...removedCats],
-                    dimension_deltas: []
-                  };
-                }
-
-                const driftPct = s4.drift_score_pct != null
-                  ? s4.drift_score_pct
-                  : (s4.drift_score != null ? (s4.drift_score * 100).toFixed(1) : '0.0');
-                document.getElementById('driftScoreVal').innerText = driftPct + '%';
-
-                const rawSev = (s4.severity || 'NONE').toUpperCase();
-                const sev = rawSev === 'CRITICAL' ? 'CRITICAL' :
-                            rawSev === 'HIGH' ? 'HIGH' :
-                            rawSev === 'MEDIUM' ? 'MEDIUM' :
-                            rawSev === 'LOW' ? 'LOW' : 'NONE';
-                const sevBadge = document.getElementById('driftSeverityBadge');
-                sevBadge.innerText = sev;
-                sevBadge.className = sev === 'CRITICAL' ? 'badge-critical' :
-                                     sev === 'HIGH' ? 'badge-high' :
-                                     sev === 'MEDIUM' ? 'badge-medium' :
-                                     sev === 'LOW' ? 'badge-low' : 'badge-none';
-
-                const detectedVal = document.getElementById('driftDetectedVal');
-                const isDrift = Boolean(s4.drift_detected);
-                detectedVal.innerText = isDrift ? 'YES' : 'NO';
-                detectedVal.style.color = isDrift ? '#f87171' : '#4ade80';
-
-                document.getElementById('driftSummaryText').innerText = s4.summary || 'No behavioral drift detected.';
-
-                const affRow = document.getElementById('affectedDimensionsRow');
-                const affText = document.getElementById('affectedDimensionsText');
-                if (s4.flagged_drift_areas && s4.flagged_drift_areas.length > 0) {
-                  affRow.style.display = 'block';
-                  affText.innerText = s4.flagged_drift_areas.join(', ');
-                } else {
-                  affRow.style.display = 'none';
-                }
-
-                const deltasList = document.getElementById('dimensionDeltasList');
-                deltasList.innerHTML = '';
-                if (!s4.dimension_deltas || s4.dimension_deltas.length === 0) {
-                  deltasList.innerHTML = '<div style="font-size: 11px; opacity: 0.7; font-style: italic;">No dimension deltas to display.</div>';
-                } else {
-                  s4.dimension_deltas.forEach(d => {
-                    const icon = d.has_drift ? '⚠️' : '✔️';
-                    let detailHtml = '';
-                    if (d.has_drift) {
-                      if (d.added_behaviors && d.added_behaviors.length > 0) {
-                        detailHtml += '<div style="margin-left: 14px; font-size: 11px; color: #4ade80;">- Added in v2: <code>' + d.added_behaviors.join(', ') + '</code></div>';
-                      }
-                      if (d.removed_behaviors && d.removed_behaviors.length > 0) {
-                        detailHtml += '<div style="margin-left: 14px; font-size: 11px; color: #f87171;">- Removed from v1: <code>' + d.removed_behaviors.join(', ') + '</code></div>';
-                      }
-                    } else {
-                      detailHtml = '<div style="margin-left: 14px; font-size: 11px; opacity: 0.7;">No divergence detected in this dimension.</div>';
-                    }
-                    deltasList.innerHTML += \`<div style="margin-bottom: 6px; padding: 4px 6px; background: rgba(0,0,0,0.15); border-radius: 3px;">
-                      <div style="font-size: 12px; font-weight: 600;">\${icon} \${(d.dimension || '').toUpperCase()} <span style="font-size: 11px; font-weight: normal; opacity: 0.7;">(weight: \${Number(d.weight || 0).toFixed(2)})</span></div>
-                      \${detailHtml}
-                    </div>\`;
-                  });
-                }
-
-                // Render Stage 5: Impact & Architectural Blast Radius Assessment
-                const s5 = data.stage5_impact;
-                if (s5) {
-                  const risk = (s5.risk_level || 'LOW').toUpperCase();
-                  const riskBadge = document.getElementById('riskLevelBadge');
-                  riskBadge.innerText = risk;
-                  riskBadge.className = risk === 'CRITICAL' ? 'badge-critical' :
-                                        risk === 'HIGH' ? 'badge-high' :
-                                        risk === 'MEDIUM' ? 'badge-medium' :
-                                        risk === 'LOW' ? 'badge-low' : 'badge-none';
-
-                  const blastVal = document.getElementById('blastRadiusVal');
-                  blastVal.innerText = s5.blast_radius || 'LOCAL';
-
-                  const compatVal = document.getElementById('backwardCompatVal');
-                  const compatIntact = s5.backward_compatibility_intact;
-                  compatVal.innerText = compatIntact ? 'INTACT' : 'COMPROMISED';
-                  compatVal.style.color = compatIntact ? '#4ade80' : '#f87171';
-
-                  document.getElementById('execSummaryText').innerText = s5.executive_summary || 'N/A';
-                  document.getElementById('silentRiskText').innerText = s5.silent_regression_risk || 'N/A';
-
-                  const archSec = document.getElementById('archRisksSection');
-                  const archList = document.getElementById('archRisksList');
-                  if (s5.architectural_risks && s5.architectural_risks.length > 0) {
-                    archSec.style.display = 'block';
-                    archList.innerHTML = s5.architectural_risks.map(r => \`<div style="margin-bottom: 3px;">• \${r}</div>\`).join('');
-                  } else {
-                    archSec.style.display = 'none';
-                  }
-
-                  const mitSec = document.getElementById('mitigationsSection');
-                  const mitList = document.getElementById('mitigationsList');
-                  if (s5.recommended_mitigations && s5.recommended_mitigations.length > 0) {
-                    mitSec.style.display = 'block';
-                    mitList.innerHTML = s5.recommended_mitigations.map(m => \`<div style="margin-bottom: 3px;">• \${m}</div>\`).join('');
-                  } else {
-                    mitSec.style.display = 'none';
-                  }
-                }
-
-                // Render Stage 6: Developer Guidance & JUnit Test Generation
-                const s6 = data.stage6_guidance;
+                // Render Stage 4: Developer Guidance & AI Method Body Behavioral Comparison
+                const s6 = data.stage6_guidance || data.stage4_guidance;
                 if (s6) {
-                  document.getElementById('guidanceOverviewText').innerText = s6.overview || 'Analysis complete.';
-                  document.getElementById('techBreakdownText').innerText = s6.detailed_drift_breakdown || 'No technical divergence breakdown available.';
+                  const overviewEl = document.getElementById('guidanceOverviewText');
+                  if (overviewEl) {
+                    overviewEl.innerText = s6.overview || 'Analysis complete.';
+                  }
+
+                  const bodyCompText = document.getElementById('bodyComparisonText');
+                  if (bodyCompText) {
+                    bodyCompText.innerText = s6.body_comparison_explanation || 'No statement-level divergence detected between baseline and modified method bodies.';
+                  }
+
+                  const techEl = document.getElementById('techBreakdownText');
+                  if (techEl) {
+                    techEl.innerText = s6.detailed_drift_breakdown || 'No technical divergence breakdown available.';
+                  }
 
                   const failSec = document.getElementById('failureScenariosSec');
                   const failList = document.getElementById('failureScenariosList');
