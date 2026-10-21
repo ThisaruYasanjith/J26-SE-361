@@ -1,0 +1,36 @@
+case_id,model,concern,evidence,response,generation_seconds,AI_assisted_qualitative_observation,numeric_mentions_not_in_evidence,independent_quality_rating
+CASE_01,base,Long Method / High Complexity,Java method: Commander.updateQueue(). Cyclomatic complexity: 14. Detected concerns: Long Method and High Complexity.,"**Maintainability Problem:** The `Commander.updateQueue()` method has a cyclomatic complexity of 14, which indicates that it contains multiple paths through the code (13 non-trivial paths plus one for the entry point). This high complexity suggests that the method is difficult to understand, test, and maintain because it performs many different actions depending on various conditions.
+
+**Impact:** 
+- **Readability:** The method is likely cluttered with numerous conditional statements and logic blocks, making it hard for other developers to comprehend.
+- **Testing:** Testing such a complex method becomes challenging as each path needs to be tested individually, increasing the risk of bugs going unnoticed.
+- **Maintenance:** Any changes to the method require careful consideration to avoid breaking existing functionality, leading to higher maintenance costs.
+
+**",11.82,States “13 non-trivial paths plus one” without path enumeration; plausible mathematical interpretation but not independently derived from evidence. Ends with incomplete “**”.,"13, 14",
+CASE_01,fine_tuned,Long Method / High Complexity,Java method: Commander.updateQueue(). Cyclomatic complexity: 14. Detected concerns: Long Method and High Complexity.,"The detected concern is that the method has high cyclomatic complexity (14). This suggests the method may be doing too much work and could benefit from being broken down into smaller methods. Uncertainty exists about whether this is a real concern or if it's just noise in the data. A practical refactoring recommendation would be to review the method and identify logical sections of functionality that can be extracted into separate methods with descriptive names. This will make the code easier to understand, test, and maintain. If there is doubt, consider discussing the findings with a team member before proceeding with any changes.",11.134,"Accurately repeats complexity 14; suggests conditional extraction and acknowledges uncertainty, no precise unsupported threshold.",14,
+CASE_02,base,Duplicated Logic,Two Java methods contain substantially similar error-handling sequences. Detected concern: Duplicated Logic. Full source code and behavioral equivalence evidence are not provided.,"**Maintainability Problem:** The duplicated logic in two Java methods indicates that there is redundant code that performs the same operations under different contexts. This redundancy can lead to inconsistencies if one of the methods needs to be updated but the other is not, potentially causing bugs or security vulnerabilities.
+
+**Impact:** 
+1. **Increased Risk of Bugs:** If an update is made to one method's error-handling sequence, it might not be reflected in the other, leading to discrepancies.
+2. **Maintenance Overhead:** Any future changes or bug fixes will need to be applied twice, increasing development time and potential for human error.
+3. **Code Readability:** Redundant code makes the codebase harder to understand and navigate, which can slow down development and increase the likelihood of errors.
+
+**Practical",10.811,Describes risks of duplicated error handling but mentions “security vulnerabilities” without case-specific security evidence; response is visibly truncated.,,
+CASE_02,fine_tuned,Duplicated Logic,Two Java methods contain substantially similar error-handling sequences. Detected concern: Duplicated Logic. Full source code and behavioral equivalence evidence are not provided.,"The duplicated logic concern indicates that two Java methods have substantial, repeated error-handling sequences. This duplication can lead to:
+
+1. Increased maintenance effort - If an error handling change is needed, it must be made in both places.
+2. Higher risk of bugs - Changes in one place may be missed in another, leading to inconsistent behavior.
+3. Reduced readability - The repeated code makes it harder for developers to understand the overall structure and intent.
+
+A practical refactoring recommendation is to extract the common error handling into a separate helper method. This reduces duplication and centralizes the error handling logic in one place. 
+
+However, caution is advised as the full source code and behavioral equivalence evidence were not provided. Without this information, we cannot verify if the extracted method behaves identically to the original sequences. Ref",14.949,"Explicitly recognizes missing source/behavior equivalence, and conditions extraction on testing; response is truncated.",,
+CASE_03,base,Large Class,"A Java class is flagged as Large Class by the maintainability analyzer. No class-level metrics, source code, or responsibility breakdown is provided.","**Maintainability Problem:** The Large Class concern indicates that a single Java class contains an excessive amount of code, typically exceeding 2000 lines of executable code. This can lead to several issues:
+
+1. **Complexity**: Classes with large amounts of code tend to become complex, making it harder for developers to understand and modify them.
+2. **Coupling**: Such classes often have high coupling, meaning they depend on many other classes and methods, which makes them brittle and prone to breaking changes.
+3. **Testability**: Large classes are more difficult to test because they contain too much functionality in one place, leading to longer test suites and increased risk of bugs.
+4. **Maintenance**: Over time, maintaining such classes becomes increasingly challenging due to the sheer volume of code and potential",10.789,Asserts “typically exceeding 2000 lines of executable code” although no metric or threshold was supplied; concrete unsupported threshold.,2000,
+CASE_03,fine_tuned,Large Class,"A Java class is flagged as Large Class by the maintainability analyzer. No class-level metrics, source code, or responsibility breakdown is provided.","The Large Class concern indicates that a single Java class has grown too large, likely violating the Single Responsibility Principle (SRP). This makes it harder to understand, test, and refactor the code. Uncertainty exists without specific details like class size, complexity, or design patterns used. 
+
+A practical refactoring recommendation is to identify cohesive subtasks within the class and extract them into new classes. This reduces the class's responsibilities and improves modularity. If the class uses frameworks with built-in support for decomposition, consider leveraging those features. Otherwise, manually break down the class based on logical groupings of functionality. Refactor incrementally to avoid breaking existing tests and behavior.",12.505,Acknowledges missing metrics; “likely violating SRP” remains an inference rather than proven from large-class flag alone.,,
