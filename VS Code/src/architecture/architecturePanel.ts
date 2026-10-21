@@ -3,15 +3,16 @@ import { randomBytes } from 'node:crypto';
 import { ArchitectureBackendClient, BackendApiError, DEFAULT_BACKEND_URL, friendlyError } from './backendClient';
 import { isRecord } from './contracts';
 import { ArchitectureRuleWorkflow } from './ruleWorkflow';
-import { analysisFormHtml, ruleFormHtml, ruleWebviewScript } from './architectureView';
+import { analysisFormHtml, conformanceFormHtml, ruleFormHtml, ruleWebviewScript } from './architectureView';
 import { ProjectAnalysisWorkflow } from './analysisWorkflow';
 import { ProjectContextSyncWorkflow } from './contextSyncWorkflow';
+import { ConformanceWorkflow } from './conformanceWorkflow';
 
 export class ArchitecturePanel {
   private static currentPanel: vscode.WebviewPanel | undefined;
 
   public static show(context: vscode.ExtensionContext, output: vscode.OutputChannel, analysis: ProjectAnalysisWorkflow,
-    contextSync: ProjectContextSyncWorkflow) {
+    contextSync: ProjectContextSyncWorkflow, conformance: ConformanceWorkflow) {
     if (ArchitecturePanel.currentPanel) {
       ArchitecturePanel.currentPanel.reveal(vscode.ViewColumn.Beside);
       return;
@@ -37,6 +38,9 @@ export class ArchitecturePanel {
     const unsubscribeAnalysis = analysis.subscribe(state => send({ type: 'analysis', state }));
     const sendSync = () => send({ type: 'contextSync', state: contextSync.state,
       canSync: contextSync.canSync, syncing: contextSync.isRunning });
+    const sendConformance = () => send({ type: 'conformance', state: conformance.state,
+      canCheck: conformance.canCheck, checking: conformance.isRunning });
+    const unsubscribeConformance = conformance.subscribe(sendConformance);
     let lastSyncState = contextSync.state;
     const unsubscribeSync = contextSync.subscribe(state => {
       // An interpretation reviewed against the previous context should be regenerated.
@@ -49,8 +53,14 @@ export class ArchitecturePanel {
     });
     const listener = panel.webview.onDidReceiveMessage(async (message: unknown) => {
       if (!isRecord(message) || disposed) { return; }
-      if (message.type === 'ready') { send({ type: 'analysis', state: analysis.state }); sendSync(); return; }
-      if (busy || contextSync.isRunning) { return; }
+      if (message.type === 'ready') { send({ type: 'analysis', state: analysis.state }); sendSync(); sendConformance(); return; }
+      if (message.type === 'openViolation' && typeof message.violationId === 'string') {
+        if (!await conformance.navigate(message.violationId)) { void vscode.window.showWarningMessage('Architecture violation source is unavailable. See Architecture Governance output.'); }
+        return;
+      }
+      if (message.type === 'clearConformance') { conformance.clear(); return; }
+      if (busy || contextSync.isRunning || conformance.isRunning) { return; }
+      if (message.type === 'checkConformance') { await conformance.run(); return; }
       if (message.type === 'scan') { await analysis.run(); return; }
       if (message.type === 'sync') {
         await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
@@ -86,7 +96,10 @@ export class ArchitecturePanel {
               return !disposed && choice === 'Approve anyway';
             });
             if (result.cancelled) { send({ type: 'cancelled', canApprove: workflow.canApprove }); }
-            else { send({ type: 'approved', approval: result.approval }); }
+            else {
+              conformance.invalidate();
+              send({ type: 'approved', approval: result.approval });
+            }
           }
         });
       } catch (error) {
@@ -105,6 +118,7 @@ export class ArchitecturePanel {
       listener.dispose();
       unsubscribeAnalysis();
       unsubscribeSync();
+      unsubscribeConformance();
       client.dispose();
       ArchitecturePanel.currentPanel = undefined;
     });
@@ -184,6 +198,7 @@ export class ArchitecturePanel {
           <h2>Architecture Breakdown</h2>
         </div>
         ${analysisFormHtml}
+        ${conformanceFormHtml}
         ${ruleFormHtml}
         <script nonce="${nonce}">${ruleWebviewScript}</script>
       </body>

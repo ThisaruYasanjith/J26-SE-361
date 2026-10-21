@@ -8,6 +8,8 @@ import { AnalyzerRunner } from "./architecture/analyzerRunner";
 import { ProjectAnalysisWorkflow } from "./architecture/analysisWorkflow";
 import { ArchitectureBackendClient, DEFAULT_BACKEND_URL } from "./architecture/backendClient";
 import { ProjectContextSyncWorkflow } from "./architecture/contextSyncWorkflow";
+import { ConformanceWorkflow } from "./architecture/conformanceWorkflow";
+import { VscodeConformanceDiagnostics } from "./architecture/conformanceDiagnostics";
 
 export function activate(context: vscode.ExtensionContext) {
   const architectureOutput = vscode.window.createOutputChannel("Architecture Governance");
@@ -42,6 +44,24 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(syncClient, contextSync, vscode.workspace.onDidChangeConfiguration(event => {
     if (event.affectsConfiguration('architectureGovernance.aiBackendUrl')) { contextSync.reset(); }
   }));
+  const diagnostics = new VscodeConformanceDiagnostics(architectureOutput);
+  const conformance = new ConformanceWorkflow(analysis, contextSync, syncClient, diagnostics, architectureOutput, {
+    progress: async (task, cancel) => vscode.window.withProgress({
+      location: vscode.ProgressLocation.Notification, title: "Checking architecture conformance...", cancellable: true,
+    }, async (_progress, token) => {
+      const subscription = token.onCancellationRequested(cancel);
+      try {
+        if (token.isCancellationRequested) { cancel(); }
+        await task();
+      } finally { subscription.dispose(); }
+    }),
+  });
+  context.subscriptions.push(conformance, diagnostics, vscode.workspace.onDidChangeWorkspaceFolders(() => {
+    if (analysis.state.status === 'succeeded') {
+      const root = analysis.state.summary.projectRoot;
+      if (!vscode.workspace.workspaceFolders?.some(folder => folder.uri.fsPath === root)) { contextSync.reset(); }
+    }
+  }));
   // Register sidebar buttons view
   vscode.window.registerTreeDataProvider(
     "analyzer.dashboardView",
@@ -51,11 +71,15 @@ export function activate(context: vscode.ExtensionContext) {
   // Register commands to open each full window panel
   context.subscriptions.push(
     vscode.commands.registerCommand("analyzer.openArchitecture", () => {
-      ArchitecturePanel.show(context, architectureOutput, analysis, contextSync);
+      ArchitecturePanel.show(context, architectureOutput, analysis, contextSync, conformance);
     }),
     vscode.commands.registerCommand("architectureGovernance.analyzeProject", async () => {
-      ArchitecturePanel.show(context, architectureOutput, analysis, contextSync);
+      ArchitecturePanel.show(context, architectureOutput, analysis, contextSync, conformance);
       await analysis.run();
+    }),
+    vscode.commands.registerCommand("architectureGovernance.checkConformance", async () => {
+      ArchitecturePanel.show(context, architectureOutput, analysis, contextSync, conformance);
+      await conformance.run();
     }),
     vscode.commands.registerCommand("analyzer.openCodeQuality", () => {
       CodeQualityPanel.show(context);

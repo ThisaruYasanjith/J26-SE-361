@@ -2,6 +2,7 @@ import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { ruleWebviewScript } from '../../architecture/architectureView';
+import { conformanceResponse, exampleViolation } from './conformanceFixtures';
 
 class Element {
   textContent = '';
@@ -158,4 +159,70 @@ test('successful sync reports backend metadata and clears a stale rule interpret
   assert.ok(element('approve').disabled);
   assert.equal(element('interpretation').children.length, 0);
   assert.equal(element('generate').disabled, false);
+});
+
+test('conformance starts not checked and requires a synchronized context to enable its action', () => {
+  const { element, receive, sent } = view();
+  receive({ type: 'conformance', state: { status: 'not-checked' }, checking: false, canCheck: false });
+  assert.match(element('conformance-status').textContent, /not checked/);
+  assert.equal(element('check-conformance').disabled, true);
+  element('check-conformance').fire('click');
+  assert.equal(sent.length, 0);
+  receive({ type: 'conformance', state: { status: 'not-checked' }, checking: false, canCheck: true });
+  element('check-conformance').fire('click');
+  assert.deepEqual(sent, [{ type: 'checkConformance' }]);
+  assert.match(element('conformance-status').textContent, /checking/);
+  assert.ok(element('check-conformance').disabled && element('generate').disabled);
+});
+test('checking and conformant states show an independent summary without touching AI status', () => {
+  const { element, receive } = view();
+  receive({ type: 'proposal', response, canApprove: true });
+  const aiStatus = element('rule-status').textContent;
+  receive({ type: 'conformance', state: { status: 'checking' }, checking: true, canCheck: false });
+  assert.match(element('conformance-status').textContent, /checking/);
+  receive({ type: 'conformance', state: { status: 'checked', result: conformanceResponse([]), navigableViolationIds: [] }, checking: false, canCheck: true });
+  assert.match(element('conformance-status').textContent, /passed \(conformant\)/);
+  assert.equal(element('violation-list').children.length, 0);
+  const text = element('conformance-summary').children.map(child => child.textContent).join('\n');
+  for (const value of ['Conformant', 'true', 'Total violations', 'Base rule violations', 'Custom rule violations', '0']) { assert.ok(text.includes(value)); }
+  assert.equal(element('rule-status').textContent, aiStatus);
+});
+test('violation cards show backend fields as text and navigate using only a violation ID', () => {
+  const { element, receive, sent } = view();
+  const violation = { ...exampleViolation, message: '<img src=x onerror=alert(1)>' };
+  receive({ type: 'conformance', state: { status: 'checked', result: conformanceResponse([violation]),
+    navigableViolationIds: [violation.violation_id] }, checking: false, canCheck: true });
+  assert.match(element('conformance-status').textContent, /violations found/);
+  const card = element('violation-list').children[0];
+  const button = card.children[0];
+  assert.equal(button.textContent, 'ERROR: <img src=x onerror=alert(1)>');
+  const text = card.children[1].children.map(child => child.textContent).join('\n');
+  for (const value of [violation.source, violation.target!, violation.relationship!, violation.rule_id, 'BASE', 'COMPONENT_ACCESS']) {
+    assert.ok(text.includes(value));
+  }
+  button.fire('click');
+  assert.deepEqual(sent, [{ type: 'openViolation', violationId: violation.violation_id }]);
+});
+test('findings with unavailable files remain visible with navigation disabled', () => {
+  const { element, receive, sent } = view();
+  receive({ type: 'conformance', state: { status: 'checked', result: conformanceResponse(), navigableViolationIds: [] }, checking: false, canCheck: true });
+  const card = element('violation-list').children[0];
+  assert.ok(card.children[0].disabled);
+  card.children[0].fire('click');
+  assert.equal(sent.length, 0);
+  assert.ok(card.children[1].children.some(child => child.textContent.includes('unavailable')));
+});
+test('stale, failed and cleared conformance states remove old findings without hiding scan results', () => {
+  const { element, receive, sent } = view();
+  receive({ type: 'analysis', state: { status: 'succeeded', summary: { projectName: 'payments', componentCount: 7,
+    relationshipCount: 15, contextPath: '/project/.architecture/project_context.json' } } });
+  receive({ type: 'conformance', state: { status: 'checked', result: conformanceResponse(), navigableViolationIds: [] }, checking: false, canCheck: true });
+  receive({ type: 'conformance', state: { status: 'stale', message: 'Re-analyzed. Sync again.' }, checking: false, canCheck: false });
+  assert.match(element('conformance-status').textContent, /stale \/ not checked/);
+  assert.equal(element('violation-list').children.length, 0);
+  assert.match(element('scan-status').textContent, /scan complete/);
+  receive({ type: 'conformance', state: { status: 'failed', message: 'Backend unavailable.' }, checking: false, canCheck: true });
+  assert.match(element('conformance-status').textContent, /check failed.*Backend unavailable/);
+  element('clear-conformance').fire('click');
+  assert.deepEqual(sent, [{ type: 'clearConformance' }]);
 });

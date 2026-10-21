@@ -51,6 +51,75 @@ export interface ConflictItem { existing_rule_id: string; reason: string; }
 export interface ConflictResponse { has_conflict: boolean; duplicate: boolean; conflicts: ConflictItem[]; }
 export interface ApprovalResponse { approved: boolean; rule_id: string; conflicts_confirmed: boolean; duplicate: boolean; }
 
+export type ViolationSeverity = 'INFO' | 'WARNING' | 'ERROR';
+export interface SourceLocation { start_line?: number | null; end_line?: number | null; }
+export interface ArchitectureViolation extends SourceLocation {
+  violation_id: string;
+  rule_id: string;
+  severity: ViolationSeverity;
+  message: string;
+  source: string;
+  target?: string | null;
+  relationship?: Relationship | 'CONTAINS' | null;
+  // The backend normally supplies these fields; missing evidence must still be visible in the panel.
+  file_path?: string | null;
+  explanation: string;
+  suggested_correction: string;
+}
+export interface ConformanceSummary { total: number; base_rule_violations: number; custom_rule_violations: number; }
+export interface ConformanceRuleMetadata { rule_type: RuleType; rule_source: 'BASE' | 'CUSTOM'; }
+export interface ConformanceResponse {
+  project_name: string;
+  conformant: boolean;
+  violations: ArchitectureViolation[];
+  summary: ConformanceSummary;
+  rule_metadata: Record<string, ConformanceRuleMetadata>;
+}
+
+export function normalizeConformanceEvidence(value: unknown): unknown {
+  if (!isRecord(value) || !Array.isArray(value.violations)) { return value; }
+  // Keep a finding visible when only its source evidence is malformed. Never change its decision or message.
+  return { ...value, violations: value.violations.map(item => {
+    if (!isRecord(item)) { return item; }
+    const invalidLines = !optional(item.start_line, line => typeof line === 'number')
+      || !optional(item.end_line, line => typeof line === 'number');
+    return { ...item, file_path: optional(item.file_path, file => typeof file === 'string') ? item.file_path : undefined,
+      start_line: invalidLines ? undefined : item.start_line, end_line: invalidLines ? undefined : item.end_line };
+  }) };
+}
+
+export function isConformanceResponse(value: unknown): value is ConformanceResponse {
+  if (!isRecord(value) || typeof value.project_name !== 'string' || !value.project_name.trim()
+    || typeof value.conformant !== 'boolean' || !Array.isArray(value.violations)
+    || !isRecord(value.summary) || !isRecord(value.rule_metadata)) { return false; }
+  const { summary, violations, rule_metadata: metadata } = value;
+  if (![summary.total, summary.base_rule_violations, summary.custom_rule_violations]
+    .every(count => Number.isSafeInteger(count) && (count as number) >= 0)
+    || summary.total !== violations.length || summary.total !== (summary.base_rule_violations as number) + (summary.custom_rule_violations as number)
+    || value.conformant !== (violations.length === 0)) { return false; }
+  const ids = new Set<string>();
+  let base = 0;
+  for (const item of violations) {
+    if (!isRecord(item) || !['violation_id', 'rule_id', 'message', 'source', 'explanation', 'suggested_correction']
+      .every(key => typeof item[key] === 'string' && (item[key] as string).trim())
+      || !member(item.severity, ['ERROR', 'WARNING', 'INFO'])
+      || !optional(item.target, value => typeof value === 'string')
+      || !optional(item.relationship, value => member(value, ['DEPENDS_ON', 'CALLS', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS', 'CONTAINS', 'LOCATED_IN']))
+      || !optional(item.file_path, value => typeof value === 'string')
+      || !optional(item.start_line, value => typeof value === 'number') || !optional(item.end_line, value => typeof value === 'number')) { return false; }
+    if (ids.has(item.violation_id as string)) { return false; }
+    ids.add(item.violation_id as string);
+    const rule = metadata[item.rule_id as string];
+    if (!isRecord(rule) || !member(rule.rule_source, ['BASE', 'CUSTOM'])
+      || !member(rule.rule_type, ['LAYER_DEPENDENCY', 'COMPONENT_ACCESS', 'PACKAGE_PLACEMENT', 'EXCEPTION'])) { return false; }
+    if (rule.rule_source === 'BASE') { base++; }
+  }
+  return base === summary.base_rule_violations;
+}
+function optional(value: unknown, accepts: (value: unknown) => boolean): boolean {
+  return value === undefined || value === null || accepts(value);
+}
+
 // The extension checks the context header; the backend validates each component and relationship in full.
 export interface ProjectContext {
   schema_version: '1.0';

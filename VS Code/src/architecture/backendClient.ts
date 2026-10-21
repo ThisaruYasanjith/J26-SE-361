@@ -2,6 +2,7 @@ import {
   ApprovalResponse, ConflictResponse, GeneratedRuleResponse, ValidRuleEnvelope, ValidationError,
   isApprovalResponse, isConflictResponse, isGeneratedResponse, isRecord, isValidationError,
   ProjectContext, ProjectContextSyncResponse, isContextSyncResponse,
+  ConformanceResponse, isConformanceResponse, normalizeConformanceEvidence,
 } from './contracts';
 
 export const DEFAULT_BACKEND_URL = 'http://127.0.0.1:8000';
@@ -16,6 +17,10 @@ export interface ArchitectureBackend {
 export interface ContextSyncBackend {
   readonly baseUrl: string;
   syncProjectContext(context: ProjectContext): Promise<ProjectContextSyncResponse>;
+}
+export interface ConformanceBackend {
+  readonly baseUrl: string;
+  checkConformance(signal?: AbortSignal): Promise<ConformanceResponse>;
 }
 export class BackendApiError extends Error {
   constructor(public readonly kind: BackendErrorKind, message: string, public readonly status?: number,
@@ -37,7 +42,7 @@ export function friendlyError(error: unknown): string {
   return error instanceof BackendApiError ? error.message : 'Architecture request failed. See the Architecture Governance output channel.';
 }
 
-export class ArchitectureBackendClient implements ArchitectureBackend, ContextSyncBackend {
+export class ArchitectureBackendClient implements ArchitectureBackend, ContextSyncBackend, ConformanceBackend {
   private readonly requests = new Set<AbortController>();
   private disposed = false;
 
@@ -61,16 +66,22 @@ export class ArchitectureBackendClient implements ArchitectureBackend, ContextSy
     this.output.appendLine(`Sync project ${JSON.stringify(context.project_name)}: ${context.components.length} components, ${context.relationships.length} relationships`);
     return this.request('PUT', '/context/project', context, isContextSyncResponse);
   }
+  checkConformance(signal?: AbortSignal): Promise<ConformanceResponse> {
+    return this.request('POST', '/conformance/check', undefined, isConformanceResponse, signal, normalizeConformanceEvidence);
+  }
   dispose(): void {
     this.disposed = true;
     for (const request of this.requests) { request.abort(); }
   }
 
-  private async request<T>(method: 'POST' | 'PUT', path: string, payload: unknown, accepts: (value: unknown) => value is T): Promise<T> {
-    if (this.disposed) { throw new BackendApiError('cancelled', 'Architecture request cancelled.'); }
+  private async request<T>(method: 'POST' | 'PUT', path: string, payload: unknown, accepts: (value: unknown) => value is T,
+    signal?: AbortSignal, normalize: (value: unknown) => unknown = value => value): Promise<T> {
+    if (this.disposed || signal?.aborted) { throw new BackendApiError('cancelled', 'Architecture request cancelled.'); }
     const baseUrl = this.baseUrl;
     this.output.appendLine(`${method} ${baseUrl}${path}`);
     const controller = new AbortController();
+    const cancel = () => controller.abort();
+    signal?.addEventListener('abort', cancel, { once: true });
     this.requests.add(controller);
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, this.timeoutMs);
@@ -86,6 +97,7 @@ export class ArchitectureBackendClient implements ArchitectureBackend, ContextSy
         if (!response.ok) { throw new BackendApiError('http', `Architecture backend request failed (HTTP ${response.status}).`, response.status); }
         throw new BackendApiError('invalid-response', 'Architecture backend returned invalid JSON. Check the configured URL.', response.status);
       }
+      if (controller.signal.aborted) { throw new Error('Architecture request aborted'); }
       if (!response.ok) {
         const conflicts = response.status === 409 && isConflictResponse(data) ? data : undefined;
         const errors = isRecord(data) && Array.isArray(data.validation_errors) ? data.validation_errors.filter(isValidationError)
@@ -99,8 +111,12 @@ export class ArchitectureBackendClient implements ArchitectureBackend, ContextSy
         if (detail) { this.output.appendLine(`Backend detail: ${detail}`); }
         throw new BackendApiError('http', message, response.status, conflicts, errors);
       }
+      data = normalize(data);
       if (!accepts(data)) {
         throw new BackendApiError('invalid-response', 'Architecture backend returned an unexpected response. Check the backend version and URL.', response.status);
+      }
+      if (isConformanceResponse(data)) {
+        this.output.appendLine(`Conformance: ${JSON.stringify(data.project_name)}, ${data.summary.total} violations (${data.summary.base_rule_violations} base, ${data.summary.custom_rule_violations} custom)`);
       }
       if (isGeneratedResponse(data)) {
         this.output.appendLine(`Generation: JSON valid=${data.json_valid}, schema valid=${data.schema_valid}, validation errors=${data.validation_errors.length}`);
@@ -127,6 +143,7 @@ export class ArchitectureBackendClient implements ArchitectureBackend, ContextSy
       throw new BackendApiError('network', 'Cannot reach the architecture backend. Check architectureGovernance.aiBackendUrl and that the service is running.');
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
       this.requests.delete(controller);
     }
   }

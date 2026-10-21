@@ -43,6 +43,10 @@
     },
     "commands": [
       {
+        "command": "architectureGovernance.checkConformance",
+        "title": "Architecture Governance: Check Architecture Conformance"
+      },
+      {
         "command": "architectureGovernance.analyzeProject",
         "title": "Architecture Governance: Analyze Project Architecture"
       },
@@ -77,7 +81,7 @@
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vscode-test",
-    "test:architecture": "npm run compile-tests && node --test out/test/architecture/backendClient.unit.js out/test/architecture/ruleWorkflow.unit.js out/test/architecture/architectureView.unit.js out/test/architecture/analyzerRunner.unit.js out/test/architecture/analysisWorkflow.unit.js out/test/architecture/contextSyncWorkflow.unit.js",
+    "test:architecture": "npm run compile-tests && node --test out/test/architecture/backendClient.unit.js out/test/architecture/ruleWorkflow.unit.js out/test/architecture/architectureView.unit.js out/test/architecture/analyzerRunner.unit.js out/test/architecture/analysisWorkflow.unit.js out/test/architecture/contextSyncWorkflow.unit.js out/test/architecture/conformanceWorkflow.unit.js out/test/architecture/conformanceSources.unit.js out/test/architecture/conformanceDiagnostics.unit.js",
     "test:analyzer-integration": "npm run compile-tests && node --test out/test/architecture/analyzerRunner.integration.js"
   },
   "devDependencies": {

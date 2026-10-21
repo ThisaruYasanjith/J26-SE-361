@@ -2,6 +2,7 @@ import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ArchitectureBackendClient, BackendApiError, normalizeBaseUrl } from '../../architecture/backendClient';
 import { GeneratedRuleResponse, ProjectContext, ValidRuleEnvelope } from '../../architecture/contracts';
+import { conformanceResponse, exampleViolation } from './conformanceFixtures';
 
 export const rule: ValidRuleEnvelope = {
   status: 'VALID', reason_code: null,
@@ -21,7 +22,7 @@ function setup(data: unknown, status = 200) {
   const calls: { url: string; body: unknown }[] = [];
   const logs: string[] = [];
   const fetcher: typeof fetch = async (url, options) => {
-    calls.push({ url: String(url), body: JSON.parse(String(options?.body)) });
+    calls.push({ url: String(url), body: options?.body === undefined ? undefined : JSON.parse(String(options.body)) });
     return new Response(JSON.stringify(data), { status });
   };
   const client = new ArchitectureBackendClient(() => 'https://gpu.example/api/', { appendLine: line => logs.push(line) }, fetcher);
@@ -179,3 +180,87 @@ for (const data of [{ ...syncResult, updated: false }, { ...syncResult, componen
       (error: unknown) => error instanceof BackendApiError && error.kind === 'invalid-response');
   });
 }
+
+test('conformance uses only its deterministic POST endpoint with the configured URL prefix', async () => {
+  let configured = 'https://first.example/api/';
+  const urls: string[] = [];
+  const logs: string[] = [];
+  const response = conformanceResponse();
+  const client = new ArchitectureBackendClient(() => configured, { appendLine: line => logs.push(line) }, async (url, options) => {
+    urls.push(String(url));
+    assert.equal(options?.method, 'POST');
+    assert.equal(options?.body, undefined);
+    return new Response(JSON.stringify(response));
+  });
+  assert.deepEqual(await client.checkConformance(), response);
+  configured = 'http://localhost:9000/other';
+  await client.checkConformance();
+  assert.deepEqual(urls, ['https://first.example/api/conformance/check', 'http://localhost:9000/other/conformance/check']);
+  assert.ok(logs.some(line => line.includes('HTTP 200')) && logs.some(line => line.includes('1 violations')));
+});
+test('conformance accepts an empty conformant result', async () => {
+  const response = conformanceResponse([]);
+  assert.deepEqual(await setup(response).client.checkConformance(), response);
+});
+for (const status of [400, 409, 422, 500, 503]) {
+  test(`conformance reports HTTP ${status}`, async () => {
+    await assert.rejects(setup({ detail: 'Analyze and sync a project first.' }, status).client.checkConformance(),
+      (error: unknown) => error instanceof BackendApiError && error.status === status);
+  });
+}
+for (const response of [{}, { ...conformanceResponse(), conformant: true }, { ...conformanceResponse(), rule_metadata: {} },
+  { ...conformanceResponse(), summary: { total: 2, base_rule_violations: 2, custom_rule_violations: 0 } },
+  conformanceResponse([{ ...exampleViolation, severity: 'HINT' as never }]),
+  conformanceResponse([{ ...exampleViolation, message: '' }]), conformanceResponse([exampleViolation, exampleViolation])]) {
+  test('malformed or inconsistent conformance response is rejected', async () => {
+    await assert.rejects(setup(response).client.checkConformance(),
+      (error: unknown) => error instanceof BackendApiError && error.kind === 'invalid-response');
+  });
+}
+test('conformance preserves findings with absent evidence for panel-only display', async () => {
+  const response = conformanceResponse([{ ...exampleViolation, file_path: undefined, start_line: undefined, end_line: undefined }]);
+  const result = await setup(response).client.checkConformance();
+  assert.equal(result.violations.length, 1);
+  assert.equal(result.violations[0].file_path, undefined);
+});
+test('malformed evidence types do not hide otherwise valid conformance findings', async () => {
+  const response = { ...conformanceResponse(), violations: [{ ...exampleViolation, start_line: 'bad', end_line: {} }] };
+  const result = await setup(response).client.checkConformance();
+  assert.equal(result.violations[0].message, exampleViolation.message);
+  assert.equal(result.violations[0].start_line, undefined);
+  assert.equal(result.violations[0].end_line, undefined);
+  assert.equal(result.summary.total, 1);
+});
+test('a malformed source path becomes unavailable without changing the violation', async () => {
+  const response = { ...conformanceResponse(), violations: [{ ...exampleViolation, file_path: { unexpected: 'object' } }] };
+  const result = await setup(response).client.checkConformance();
+  assert.equal(result.violations[0].file_path, undefined);
+  assert.equal(result.violations[0].violation_id, exampleViolation.violation_id);
+});
+test('conformance reports malformed response JSON', async () => {
+  const client = new ArchitectureBackendClient(() => 'https://backend.example', { appendLine() {} }, async () => new Response('<html>not JSON</html>'));
+  await assert.rejects(client.checkConformance(), (error: unknown) => error instanceof BackendApiError && error.kind === 'invalid-response');
+});
+test('conformance reports network failure', async () => {
+  const client = new ArchitectureBackendClient(() => 'https://backend.example', { appendLine() {} }, async () => { throw new Error('Network failure'); });
+  await assert.rejects(client.checkConformance(), (error: unknown) => error instanceof BackendApiError && error.kind === 'network');
+});
+test('conformance timeout uses the shared HTTP cancellation', async () => {
+  const client = new ArchitectureBackendClient(() => 'https://backend.example', { appendLine() {} }, async (_url, options) => new Promise<Response>((_resolve, reject) => {
+    options?.signal?.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
+  }), 10);
+  await assert.rejects(client.checkConformance(), (error: unknown) => error instanceof BackendApiError && error.kind === 'timeout');
+});
+test('conformance accepts external cancellation without disposing the shared backend client', async () => {
+  const cancellation = new AbortController();
+  let calls = 0;
+  const client = new ArchitectureBackendClient(() => 'https://backend.example', { appendLine() {} }, async (_url, options) => {
+    calls++;
+    if (calls > 1) { return new Response(JSON.stringify(conformanceResponse([]))); }
+    return new Promise<Response>((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }));
+  });
+  const pending = client.checkConformance(cancellation.signal);
+  cancellation.abort();
+  await assert.rejects(pending, (error: unknown) => error instanceof BackendApiError && error.kind === 'cancelled');
+  assert.ok((await client.checkConformance()).conformant);
+});
