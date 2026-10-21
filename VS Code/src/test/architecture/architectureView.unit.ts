@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { ruleWebviewScript } from '../../architecture/architectureView';
 import { conformanceResponse, exampleViolation } from './conformanceFixtures';
+import { ActiveJavaFile, groupViolations } from '../../architecture/violationGrouping';
 
 class Element {
   textContent = '';
@@ -225,4 +226,77 @@ test('stale, failed and cleared conformance states remove old findings without h
   assert.match(element('conformance-status').textContent, /check failed.*Backend unavailable/);
   element('clear-conformance').fire('click');
   assert.deepEqual(sent, [{ type: 'clearConformance' }]);
+});
+
+function groupedMessage(result = conformanceResponse(), activeFile?: ActiveJavaFile) {
+  return { type: 'conformance', state: { status: 'checked', result,
+    navigableViolationIds: result.violations.map(item => item.violation_id) }, checking: false, canCheck: true,
+    activeFile, violationGroups: groupViolations(result.violations, activeFile) };
+}
+test('current-file findings appear first with filename/count and other findings appear once below', () => {
+  const { element, receive, sent } = view();
+  const other = { ...exampleViolation, violation_id: 'OTHER', file_path: 'src/Other.java' };
+  receive(groupedMessage(conformanceResponse([other, exampleViolation]), { filePath: 'src/Example.java', fileName: 'Example.java' }));
+  const sections = element('violation-list').children;
+  assert.equal(sections.length, 2);
+  assert.equal(sections[0].children[0].textContent, 'Current File Violations — Example.java (1)');
+  assert.equal(sections[1].children[0].textContent, 'Other Project Violations (1)');
+  assert.equal(sections[0].children.length, 2);
+  assert.equal(sections[1].children.length, 2);
+  sections[0].children[1].children[0].fire('click');
+  sections[1].children[1].children[0].fire('click');
+  assert.deepEqual(sent, [{ type: 'openViolation', violationId: exampleViolation.violation_id }, { type: 'openViolation', violationId: 'OTHER' }]);
+});
+test('a Java file with no findings shows a clear empty state and keeps other project findings', () => {
+  const { element, receive } = view();
+  receive(groupedMessage(conformanceResponse(), { filePath: 'src/Clean.java', fileName: 'Clean.java' }));
+  const sections = element('violation-list').children;
+  assert.equal(sections[0].children[0].textContent, 'Current File Violations — Clean.java (0)');
+  assert.equal(sections[0].children[1].textContent, 'No architecture violations in this file.');
+  assert.equal(sections[1].children[0].textContent, 'Other Project Violations (1)');
+});
+test('a conformant project with an active Java file omits the empty Other section', () => {
+  const { element, receive } = view();
+  receive(groupedMessage(conformanceResponse([]), { filePath: 'src/Clean.java', fileName: 'Clean.java' }));
+  assert.equal(element('violation-list').children.length, 1);
+  assert.match(element('conformance-status').textContent, /passed/);
+});
+test('switching active files reorders the cached list and preserves project-wide summary values', () => {
+  const { element, receive, sent } = view();
+  const other = { ...exampleViolation, violation_id: 'OTHER', file_path: 'src/Other.java' };
+  const result = conformanceResponse([exampleViolation, other]);
+  receive(groupedMessage(result, { filePath: 'src/Example.java', fileName: 'Example.java' }));
+  const summary = element('conformance-summary').children.map(child => child.textContent);
+  receive(groupedMessage(result, { filePath: 'src/Other.java', fileName: 'Other.java' }));
+  const current = element('violation-list').children[0];
+  assert.match(current.children[0].textContent, /Other.java/);
+  current.children[1].children[0].fire('click');
+  assert.deepEqual(sent, [{ type: 'openViolation', violationId: 'OTHER' }]);
+  assert.deepEqual(element('conformance-summary').children.map(child => child.textContent), summary);
+});
+test('no relevant Java editor restores the original flat project-wide list', () => {
+  const { element, receive, sent } = view();
+  receive(groupedMessage(conformanceResponse(), { filePath: 'src/Clean.java', fileName: 'Clean.java' }));
+  receive(groupedMessage());
+  assert.equal(element('violation-list').children.length, 1);
+  const card = element('violation-list').children[0];
+  assert.equal(card.children[0].textContent, 'ERROR: ' + exampleViolation.message);
+  card.children[0].fire('click');
+  assert.deepEqual(sent, [{ type: 'openViolation', violationId: exampleViolation.violation_id }]);
+});
+test('new conformance results replace both groups instead of retaining old findings', () => {
+  const { element, receive } = view();
+  const active = { filePath: 'src/Example.java', fileName: 'Example.java' };
+  receive(groupedMessage(conformanceResponse(), active));
+  receive(groupedMessage(conformanceResponse([]), active));
+  assert.equal(element('violation-list').children.length, 1);
+  assert.equal(element('violation-list').children[0].children[1].textContent, 'No architecture violations in this file.');
+});
+test('stale results never reappear as current-file findings', () => {
+  const { element, receive } = view();
+  const message = groupedMessage(conformanceResponse(), { filePath: 'src/Example.java', fileName: 'Example.java' });
+  receive(message);
+  receive({ ...message, state: { status: 'stale', message: 'Context changed.' } });
+  assert.equal(element('violation-list').children.length, 0);
+  assert.match(element('conformance-status').textContent, /stale/);
 });

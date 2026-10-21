@@ -7,6 +7,7 @@ import { analysisFormHtml, conformanceFormHtml, ruleFormHtml, ruleWebviewScript 
 import { ProjectAnalysisWorkflow } from './analysisWorkflow';
 import { ProjectContextSyncWorkflow } from './contextSyncWorkflow';
 import { ConformanceWorkflow } from './conformanceWorkflow';
+import { activeProjectJavaFile, groupViolations } from './violationGrouping';
 
 export class ArchitecturePanel {
   private static currentPanel: vscode.WebviewPanel | undefined;
@@ -38,9 +39,20 @@ export class ArchitecturePanel {
     const unsubscribeAnalysis = analysis.subscribe(state => send({ type: 'analysis', state }));
     const sendSync = () => send({ type: 'contextSync', state: contextSync.state,
       canSync: contextSync.canSync, syncing: contextSync.isRunning });
-    const sendConformance = () => send({ type: 'conformance', state: conformance.state,
-      canCheck: conformance.canCheck, checking: conformance.isRunning });
-    const unsubscribeConformance = conformance.subscribe(sendConformance);
+    let conformanceViewRevision = 0;
+    const sendConformance = async () => {
+      const revision = ++conformanceViewRevision;
+      const state = conformance.state;
+      const root = analysis.state.status === 'succeeded' ? analysis.state.summary.projectRoot : undefined;
+      const activeFile = state.status === 'checked' && root
+        ? await activeProjectJavaFile(root, vscode.window.activeTextEditor?.document) : undefined;
+      // Editor changes and invalidation can arrive while paths are resolving. Publish only the latest view.
+      if (disposed || revision !== conformanceViewRevision || state !== conformance.state) { return; }
+      send({ type: 'conformance', state, canCheck: conformance.canCheck, checking: conformance.isRunning, activeFile,
+        violationGroups: state.status === 'checked' ? groupViolations(state.result.violations, activeFile) : undefined });
+    };
+    const unsubscribeConformance = conformance.subscribe(() => { void sendConformance(); });
+    const editorListener = vscode.window.onDidChangeActiveTextEditor(() => { void sendConformance(); });
     let lastSyncState = contextSync.state;
     const unsubscribeSync = contextSync.subscribe(state => {
       // An interpretation reviewed against the previous context should be regenerated.
@@ -119,6 +131,7 @@ export class ArchitecturePanel {
       unsubscribeAnalysis();
       unsubscribeSync();
       unsubscribeConformance();
+      editorListener.dispose();
       client.dispose();
       ArchitecturePanel.currentPanel = undefined;
     });
@@ -190,6 +203,7 @@ export class ArchitecturePanel {
           .header i { font-size: 18px; color: var(--vscode-editorInfo-foreground); }
           .issue-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
           .issue-card p { font-size: 12px; margin: 0; color: var(--vscode-descriptionForeground); }
+          .current-file-violations { border-left: 2px solid var(--vscode-focusBorder); padding-left: 10px; }
         </style>
       </head>
       <body>

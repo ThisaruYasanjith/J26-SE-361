@@ -88,6 +88,38 @@ export const ruleWebviewScript = `
   function showErrors(items) {
     errors.textContent = items.map(item => item.path + ': ' + item.message).join('\\n');
   }
+  function renderViolations(violations, parent, result, state) {
+    for (const violation of violations) {
+      const card = document.createElement('div');
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.textContent = violation.severity + ': ' + violation.message;
+      open.disabled = !state.navigableViolationIds.includes(violation.violation_id);
+      open.addEventListener('click', () => {
+        if (!open.disabled) { vscode.postMessage({ type: 'openViolation', violationId: violation.violation_id }); }
+      });
+      card.append(open);
+      const details = document.createElement('dl');
+      field('Source', violation.source, details);
+      if (violation.relationship) { field('Relationship', violation.relationship, details); }
+      if (violation.target) { field('Target', violation.target, details); }
+      const metadata = result.rule_metadata[violation.rule_id];
+      field('Rule', violation.rule_id + ' (' + metadata.rule_source + ', ' + metadata.rule_type + ')', details);
+      if (violation.file_path) { field('Location', violation.file_path + (violation.start_line ? ':' + violation.start_line : ''), details); }
+      if (open.disabled) { field('Source navigation', 'Source file or location unavailable.', details); }
+      card.append(details);
+      parent.append(card);
+    }
+  }
+  function violationSection(title, className) {
+    const section = document.createElement('section');
+    section.className = className;
+    const heading = document.createElement('h4');
+    heading.textContent = title;
+    section.append(heading);
+    violationList.append(section);
+    return section;
+  }
   scan.addEventListener('click', () => {
     if (busy || analysisBusy || syncBusy || conformanceBusy) { return; }
     analysisBusy = true;
@@ -167,27 +199,21 @@ export const ruleWebviewScript = `
         field('Total violations', result.summary.total, conformanceSummary);
         field('Base rule violations', result.summary.base_rule_violations, conformanceSummary);
         field('Custom rule violations', result.summary.custom_rule_violations, conformanceSummary);
-        for (const violation of result.violations) {
-          const card = document.createElement('div');
-          const open = document.createElement('button');
-          open.type = 'button';
-          open.textContent = violation.severity + ': ' + violation.message;
-          open.disabled = !state.navigableViolationIds.includes(violation.violation_id);
-          open.addEventListener('click', () => {
-            if (!open.disabled) { vscode.postMessage({ type: 'openViolation', violationId: violation.violation_id }); }
-          });
-          card.append(open);
-          const details = document.createElement('dl');
-          field('Source', violation.source, details);
-          if (violation.relationship) { field('Relationship', violation.relationship, details); }
-          if (violation.target) { field('Target', violation.target, details); }
-          const metadata = result.rule_metadata[violation.rule_id];
-          field('Rule', violation.rule_id + ' (' + metadata.rule_source + ', ' + metadata.rule_type + ')', details);
-          if (violation.file_path) { field('Location', violation.file_path + (violation.start_line ? ':' + violation.start_line : ''), details); }
-          if (open.disabled) { field('Source navigation', 'Source file or location unavailable.', details); }
-          card.append(details);
-          violationList.append(card);
-        }
+        if (message.activeFile && message.violationGroups) {
+          const groups = message.violationGroups;
+          const current = violationSection('Current File Violations — ' + message.activeFile.fileName
+            + ' (' + groups.currentFileViolations.length + ')', 'current-file-violations');
+          if (groups.currentFileViolations.length === 0) {
+            const empty = document.createElement('p');
+            empty.textContent = 'No architecture violations in this file.';
+            current.append(empty);
+          }
+          renderViolations(groups.currentFileViolations, current, result, state);
+          if (groups.otherViolations.length) {
+            const other = violationSection('Other Project Violations (' + groups.otherViolations.length + ')', 'other-project-violations');
+            renderViolations(groups.otherViolations, other, result, state);
+          }
+        } else { renderViolations(result.violations, violationList, result, state); }
       } else {
         conformanceStatus.textContent = state.status === 'checking' ? 'Architecture conformance: checking...'
           : state.status === 'stale' ? 'Architecture conformance: stale / not checked. ' + (state.message || '')
