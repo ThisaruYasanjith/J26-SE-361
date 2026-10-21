@@ -1,3 +1,12 @@
+export const analysisFormHtml = `
+  <section class="issue-card" aria-labelledby="analysis-heading">
+    <h3 id="analysis-heading">Project architecture</h3>
+    <button id="scan" type="button">Scan Project Architecture</button>
+    <p id="scan-status" role="status" aria-live="polite">Scan the opened Java project to generate its local architecture context.</p>
+    <dl id="scan-summary"></dl>
+    <p>This scan updates local context only. The AI backend context is unchanged.</p>
+  </section>`;
+
 export const ruleFormHtml = `
   <section class="issue-card" aria-labelledby="rule-heading">
     <h3 id="rule-heading">Architecture rules</h3>
@@ -23,12 +32,17 @@ export const ruleWebviewScript = `
   const interpretation = document.getElementById('interpretation');
   const errors = document.getElementById('validation-errors');
   const conflicts = document.getElementById('conflicts');
+  const scan = document.getElementById('scan');
+  const scanStatus = document.getElementById('scan-status');
+  const scanSummary = document.getElementById('scan-summary');
   let busy = false;
+  let analysisBusy = false;
   let canApprove = false;
   function updateButtons() {
-    input.disabled = busy;
-    generate.disabled = busy;
-    approve.disabled = busy || !canApprove;
+    input.disabled = busy || analysisBusy;
+    generate.disabled = busy || analysisBusy;
+    approve.disabled = busy || analysisBusy || !canApprove;
+    scan.disabled = busy || analysisBusy;
   }
   function clearProposal() {
     canApprove = false;
@@ -39,16 +53,23 @@ export const ruleWebviewScript = `
     document.getElementById('raw-output').hidden = true;
     updateButtons();
   }
-  function field(label, value) {
+  function field(label, value, parent = interpretation) {
     const name = document.createElement('dt');
     const content = document.createElement('dd');
     name.textContent = label;
     content.textContent = value === undefined ? 'Not supplied' : typeof value === 'string' ? value : JSON.stringify(value);
-    interpretation.append(name, content);
+    parent.append(name, content);
   }
   function showErrors(items) {
     errors.textContent = items.map(item => item.path + ': ' + item.message).join('\\n');
   }
+  scan.addEventListener('click', () => {
+    if (busy || analysisBusy) { return; }
+    analysisBusy = true;
+    updateButtons();
+    scanStatus.textContent = 'Preparing architecture scan...';
+    vscode.postMessage({ type: 'scan' });
+  });
   input.addEventListener('input', () => {
     clearProposal();
     status.textContent = 'Generate a new interpretation for the edited requirement.';
@@ -74,6 +95,23 @@ export const ruleWebviewScript = `
   });
   window.addEventListener('message', event => {
     const message = event.data;
+    if (message.type === 'analysis') {
+      const state = message.state;
+      analysisBusy = state.status === 'selecting' || state.status === 'running';
+      scanSummary.replaceChildren();
+      if (state.status === 'succeeded') {
+        field('Project', state.summary.projectName, scanSummary);
+        field('Components', state.summary.componentCount, scanSummary);
+        field('Relationships', state.summary.relationshipCount, scanSummary);
+        field('Context file', state.summary.contextPath, scanSummary);
+        scanStatus.textContent = 'Project architecture scan complete.';
+      } else {
+        scanStatus.textContent = state.status === 'running' ? 'Analyzing Spring Boot architecture...'
+          : state.status === 'selecting' ? 'Selecting project...'
+          : state.status === 'cancelled' ? 'Architecture analysis cancelled.'
+          : state.status === 'failed' ? state.message : 'Scan the opened Java project to generate its local architecture context.';
+      }
+    }
     if (message.type === 'busy') { busy = message.busy; }
     if (message.type === 'proposal') {
       const response = message.response;
@@ -120,4 +158,6 @@ export const ruleWebviewScript = `
     }
     updateButtons();
   });
+  // Recover the latest scan result when a panel is reopened or first loads during a scan.
+  vscode.postMessage({ type: 'ready' });
 `;

@@ -3,12 +3,13 @@ import { randomBytes } from 'node:crypto';
 import { ArchitectureBackendClient, BackendApiError, DEFAULT_BACKEND_URL, friendlyError } from './backendClient';
 import { isRecord } from './contracts';
 import { ArchitectureRuleWorkflow } from './ruleWorkflow';
-import { ruleFormHtml, ruleWebviewScript } from './architectureView';
+import { analysisFormHtml, ruleFormHtml, ruleWebviewScript } from './architectureView';
+import { ProjectAnalysisWorkflow } from './analysisWorkflow';
 
 export class ArchitecturePanel {
   private static currentPanel: vscode.WebviewPanel | undefined;
 
-  public static show(context: vscode.ExtensionContext, output: vscode.OutputChannel) {
+  public static show(context: vscode.ExtensionContext, output: vscode.OutputChannel, analysis: ProjectAnalysisWorkflow) {
     if (ArchitecturePanel.currentPanel) {
       ArchitecturePanel.currentPanel.reveal(vscode.ViewColumn.Beside);
       return;
@@ -31,8 +32,12 @@ export class ArchitecturePanel {
     const send = (message: unknown) => {
       if (!disposed) { void panel.webview.postMessage(message); }
     };
+    const unsubscribeAnalysis = analysis.subscribe(state => send({ type: 'analysis', state }));
     const listener = panel.webview.onDidReceiveMessage(async (message: unknown) => {
-      if (!isRecord(message) || busy || disposed) { return; }
+      if (!isRecord(message) || disposed) { return; }
+      if (message.type === 'ready') { send({ type: 'analysis', state: analysis.state }); return; }
+      if (busy) { return; }
+      if (message.type === 'scan') { await analysis.run(); return; }
       if (message.type === 'edit') { workflow.clear(); return; }
       if (message.type !== 'generate' && message.type !== 'approve') { return; }
       if (message.type === 'generate' && typeof message.requirement !== 'string') { return; }
@@ -78,6 +83,7 @@ export class ArchitecturePanel {
     panel.onDidDispose(() => {
       disposed = true;
       listener.dispose();
+      unsubscribeAnalysis();
       client.dispose();
       ArchitecturePanel.currentPanel = undefined;
     });
@@ -156,17 +162,8 @@ export class ArchitecturePanel {
           <i class="codicon codicon-type-hierarchy"></i>
           <h2>Architecture Breakdown</h2>
         </div>
+        ${analysisFormHtml}
         ${ruleFormHtml}
-        <div class="issue-card">
-          <div class="issue-heading">
-            <strong>Layering Violation</strong>
-            <span class="tag">High</span>
-          </div>
-          <p>
-            Controller layer directly accesses persistence repositories.
-          </p>
-          <div class="code-box">UserController.java &rarr; UserRepository.java</div>
-        </div>
         <script nonce="${nonce}">${ruleWebviewScript}</script>
       </body>
       </html>

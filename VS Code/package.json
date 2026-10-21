@@ -43,6 +43,10 @@
     },
     "commands": [
       {
+        "command": "architectureGovernance.analyzeProject",
+        "title": "Architecture Governance: Analyze Project Architecture"
+      },
+      {
         "command": "analyzer.openArchitecture",
         "title": "Open Architecture Analysis"
       },
@@ -73,7 +77,8 @@
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vscode-test",
-    "test:architecture": "npm run compile-tests && node --test out/test/architecture/backendClient.unit.js out/test/architecture/ruleWorkflow.unit.js out/test/architecture/architectureView.unit.js"
+    "test:architecture": "npm run compile-tests && node --test out/test/architecture/backendClient.unit.js out/test/architecture/ruleWorkflow.unit.js out/test/architecture/architectureView.unit.js out/test/architecture/analyzerRunner.unit.js out/test/architecture/analysisWorkflow.unit.js",
+    "test:analyzer-integration": "npm run compile-tests && node --test out/test/architecture/analyzerRunner.integration.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.134.0",

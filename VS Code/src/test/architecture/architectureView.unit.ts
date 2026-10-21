@@ -29,6 +29,7 @@ function view() {
     window: { addEventListener: (_name: string, callback: typeof receive) => { receive = callback; } },
     acquireVsCodeApi: () => ({ postMessage: (message: unknown) => sent.push(JSON.parse(JSON.stringify(message))) }),
   });
+  assert.deepEqual(sent.shift(), { type: 'ready' });
   return { element, sent, receive: (data: unknown) => receive({ data }) };
 }
 const response = {
@@ -93,4 +94,29 @@ test('duplicate approval gives a clear success message and disables saving', () 
   receive({ type: 'approved', approval: { duplicate: true, rule_id: 'CUSTOM_001' } });
   assert.match(element('rule-status').textContent, /Already approved as CUSTOM_001/);
   assert.equal(element('approve').disabled, true);
+});
+test('scan button requests analysis without sending a directory from the webview', () => {
+  const { element, sent } = view();
+  element('scan').fire('click');
+  assert.deepEqual(sent, [{ type: 'scan' }]);
+  assert.ok(element('scan').disabled && element('generate').disabled);
+});
+test('scan summary displays real project metadata and context path as text', () => {
+  const { element, receive } = view();
+  receive({ type: 'analysis', state: { status: 'succeeded', summary: {
+    projectName: 'payments', componentCount: 7, relationshipCount: 15, contextPath: '/project/.architecture/project_context.json',
+  } } });
+  const text = element('scan-summary').children.map(item => item.textContent).join('\n');
+  for (const value of ['payments', '7', '15', '/project/.architecture/project_context.json']) { assert.ok(text.includes(value)); }
+  assert.match(element('scan-status').textContent, /scan complete/);
+  assert.equal(element('scan').disabled, false);
+});
+test('cancelled scan clears progress and leaves the existing AI proposal available', () => {
+  const { element, receive } = view();
+  receive({ type: 'proposal', response, canApprove: true });
+  receive({ type: 'analysis', state: { status: 'running' } });
+  assert.equal(element('approve').disabled, true);
+  receive({ type: 'analysis', state: { status: 'cancelled' } });
+  assert.match(element('scan-status').textContent, /cancelled/);
+  assert.equal(element('approve').disabled, false);
 });
