@@ -20,6 +20,9 @@ async function panel(t: TestContext) {
   for (const name of ['Example.java', 'Other.java', 'Clean.java']) { await fs.writeFile(path.join(root, 'src', name), 'class Example {}'); }
   const editor = (file: string, languageId = 'java') => ({ document: { uri: { scheme: 'file', fsPath: file }, languageId, isUntitled: false } });
   const editorEvents = new Set<() => void>();
+  const configurationEvents = new Set<(event: { affectsConfiguration: (section: string) => boolean }) => void>();
+  let backendUrl = 'http://127.0.0.1:8000';
+  const backendMessages: { configured: boolean; host?: string }[] = [];
   const conformanceEvents = new Set<() => void>();
   const navigated: string[] = [];
   const second = { ...exampleViolation, violation_id: 'OTHER', file_path: 'src/Other.java' };
@@ -43,6 +46,7 @@ async function panel(t: TestContext) {
     webview: {
       html: '', onDidReceiveMessage: (callback: typeof receive) => { receive = callback; return { dispose() {} }; },
       postMessage: async (message: ViewMessage) => {
+        if (message.type === 'backendStatus') { backendMessages.push(message as unknown as { configured: boolean; host?: string }); }
         if (message.type !== 'conformance') { return true; }
         messages.push(message);
         for (const waiter of [...waiting]) {
@@ -59,12 +63,17 @@ async function panel(t: TestContext) {
       createWebviewPanel: () => webviewPanel,
       onDidChangeActiveTextEditor: (callback: () => void) => { editorEvents.add(callback); return { dispose: () => editorEvents.delete(callback) }; },
     },
-    workspace: { getConfiguration: () => ({ get: () => 'http://127.0.0.1:8000' }) },
+    workspace: {
+      getConfiguration: () => ({ get: () => backendUrl }),
+      onDidChangeConfiguration: (callback: (event: { affectsConfiguration: (section: string) => boolean }) => void) => {
+        configurationEvents.add(callback); return { dispose: () => configurationEvents.delete(callback) };
+      },
+    },
   };
   const modulePath = path.resolve(__dirname, '../../architecture/architecturePanel.js');
   const actualRequire = createRequire(modulePath);
   const exports = {} as typeof import('../../architecture/architecturePanel');
-  runInNewContext(readFileSync(modulePath, 'utf8'), { exports, require: (name: string) => name === 'vscode' ? api : actualRequire(name) });
+  runInNewContext(readFileSync(modulePath, 'utf8'), { exports, URL, require: (name: string) => name === 'vscode' ? api : actualRequire(name) });
   const context = { subscriptions: [] } as unknown as vscode.ExtensionContext;
   const analysis = { state: { status: 'succeeded', summary: { projectRoot: root } }, subscribe: () => () => {} } as unknown as ProjectAnalysisWorkflow;
   const sync = { state: { status: 'synchronized' }, isRunning: false, canSync: true, subscribe: () => () => {} } as unknown as ProjectContextSyncWorkflow;
@@ -80,7 +89,14 @@ async function panel(t: TestContext) {
     api.window.activeTextEditor = file ? editor(file, languageId) : undefined;
     for (const callback of editorEvents) { callback(); }
   };
-  return { root, conformance, conformanceEvents, messages, navigated, editorEvents, next, activate,
+  const configureBackend = (url: string) => {
+    backendUrl = url;
+    for (const callback of configurationEvents) {
+      callback({ affectsConfiguration: section => section === 'architectureGovernance.aiBackendUrl' });
+    }
+  };
+  return { root, conformance, conformanceEvents, messages, navigated, editorEvents, configurationEvents,
+    backendMessages, configureBackend, next, activate,
     receive: (message: unknown) => receive(message), dispose: () => webviewPanel.dispose() };
 }
 
@@ -131,4 +147,19 @@ test('rapid editor changes publish the latest grouping and listeners are dispose
   host.dispose();
   assert.equal(host.editorEvents.size, 0);
   assert.equal(host.conformanceEvents.size, 0);
+  assert.equal(host.configurationEvents.size, 0);
+});
+
+test('backend configuration display publishes only the hostname and updates without a request', async t => {
+  const host = await panel(t);
+  await host.receive({ type: 'ready' });
+  assert.equal(host.backendMessages.at(-1)?.host, '127.0.0.1');
+  host.configureBackend('https://gpu.example/private/backend');
+  const configured = host.backendMessages.at(-1);
+  assert.equal(configured?.configured, true);
+  assert.equal(configured?.host, 'gpu.example');
+  assert.ok(!JSON.stringify(configured).includes('/private/backend'));
+  host.configureBackend('invalid URL');
+  assert.equal(host.backendMessages.at(-1)?.configured, false);
+  assert.equal(host.backendMessages.at(-1)?.host, undefined);
 });

@@ -19,6 +19,7 @@ dependencies = [
     "bitsandbytes>=0.45,<1",
     "torch>=2.6,<3",
     "jsonschema>=4.23,<5",
+    "peft>=0.17,<1",
 ]
 
 [project.optional-dependencies]

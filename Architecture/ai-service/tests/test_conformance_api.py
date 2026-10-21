@@ -47,7 +47,8 @@ def test_endpoint_conformant_without_a_loaded_model_or_rag_index(rig):
                               "summary": {"total": 0, "base_rule_violations": 0, "custom_rule_violations": 0}}
             assert not app.state.rag_retriever.is_indexed
             assert await request_json(app, "/model/status", method="GET") == (
-                200, {"loaded": False, "model_id": "unavailable-test-model"})
+                200, {"loaded": False, "model_id": "unavailable-test-model", "base_model": "unavailable-test-model",
+                      "model_mode": "BASE", "adapter_loaded": False, "device": None})
 
     asyncio.run(scenario())
 

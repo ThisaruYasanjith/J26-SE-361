@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { ArchitectureBackendClient, BackendApiError, DEFAULT_BACKEND_URL, friendlyError } from './backendClient';
 import { isRecord } from './contracts';
 import { ArchitectureRuleWorkflow } from './ruleWorkflow';
-import { analysisFormHtml, conformanceFormHtml, ruleFormHtml, ruleWebviewScript } from './architectureView';
+import { analysisFormHtml, architectureStyles, conformanceFormHtml, ruleFormHtml, ruleWebviewScript } from './architectureView';
 import { ProjectAnalysisWorkflow } from './analysisWorkflow';
 import { ProjectContextSyncWorkflow } from './contextSyncWorkflow';
 import { ConformanceWorkflow } from './conformanceWorkflow';
@@ -36,6 +36,13 @@ export class ArchitecturePanel {
     const send = (message: unknown) => {
       if (!disposed) { void panel.webview.postMessage(message); }
     };
+    const sendBackendStatus = () => {
+      try { send({ type: 'backendStatus', configured: true, host: new URL(client.baseUrl).hostname }); }
+      catch { send({ type: 'backendStatus', configured: false }); }
+    };
+    const configurationListener = vscode.workspace.onDidChangeConfiguration(event => {
+      if (event.affectsConfiguration('architectureGovernance.aiBackendUrl')) { sendBackendStatus(); }
+    });
     const unsubscribeAnalysis = analysis.subscribe(state => send({ type: 'analysis', state }));
     const sendSync = () => send({ type: 'contextSync', state: contextSync.state,
       canSync: contextSync.canSync, syncing: contextSync.isRunning });
@@ -65,7 +72,7 @@ export class ArchitecturePanel {
     });
     const listener = panel.webview.onDidReceiveMessage(async (message: unknown) => {
       if (!isRecord(message) || disposed) { return; }
-      if (message.type === 'ready') { send({ type: 'analysis', state: analysis.state }); sendSync(); sendConformance(); return; }
+      if (message.type === 'ready') { sendBackendStatus(); send({ type: 'analysis', state: analysis.state }); sendSync(); sendConformance(); return; }
       if (message.type === 'openViolation' && typeof message.violationId === 'string') {
         if (!await conformance.navigate(message.violationId)) { void vscode.window.showWarningMessage('Architecture violation source is unavailable. See Architecture Governance output.'); }
         return;
@@ -132,6 +139,7 @@ export class ArchitecturePanel {
       unsubscribeSync();
       unsubscribeConformance();
       editorListener.dispose();
+      configurationListener.dispose();
       client.dispose();
       ArchitecturePanel.currentPanel = undefined;
     });
@@ -148,72 +156,18 @@ export class ArchitecturePanel {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'nonce-${nonce}';">
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vscode/codicons/dist/codicon.css">
-        <style nonce="${nonce}">
-          body {
-            background-color: var(--vscode-editor-background);
-            color: var(--vscode-editor-foreground);
-            font-family: var(--vscode-font-family);
-            font-size: var(--vscode-font-size);
-            padding: 16px;
-            margin: 0;
-          }
-          .header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            border-bottom: 1px solid var(--vscode-panel-border);
-            padding-bottom: 12px;
-            margin-bottom: 16px;
-          }
-          .header h2 { margin: 0; font-size: 15px; }
-          .issue-card {
-            background-color: var(--vscode-editorWidget-background);
-            border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-            border-radius: 4px;
-            padding: 12px;
-            margin-bottom: 12px;
-          }
-          .tag {
-            background-color: var(--vscode-badge-background);
-            color: var(--vscode-badge-foreground);
-            font-size: 11px;
-            padding: 2px 6px;
-            border-radius: 3px;
-          }
-          .code-box {
-            background-color: var(--vscode-textCodeBlock-background);
-            padding: 6px 10px;
-            border-radius: 3px;
-            font-family: var(--vscode-editor-font-family, monospace);
-            font-size: 12px;
-            margin-top: 8px;
-            border: 1px solid var(--vscode-panel-border);
-          }
-          textarea { box-sizing: border-box; width: 100%; min-height: 85px; margin: 8px 0;
-            background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-            border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding: 8px; font: inherit; }
-          button { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-            border: 0; padding: 7px 12px; margin: 4px 6px 4px 0; cursor: pointer; }
-          button:disabled { opacity: .5; cursor: default; }
-          pre, dd { white-space: pre-wrap; overflow-wrap: anywhere; }
-          dt { font-weight: bold; margin-top: 8px; }
-          dd { margin-left: 0; }
-          #rule-status, #validation-errors, #conflicts { white-space: pre-wrap; }
-          #validation-errors, #conflicts { color: var(--vscode-editorWarning-foreground); }
-          .header i { font-size: 18px; color: var(--vscode-editorInfo-foreground); }
-          .issue-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-          .issue-card p { font-size: 12px; margin: 0; color: var(--vscode-descriptionForeground); }
-          .current-file-violations { border-left: 2px solid var(--vscode-focusBorder); padding-left: 10px; }
-        </style>
+        <style nonce="${nonce}">${architectureStyles}</style>
       </head>
       <body>
-        <div class="header">
-          <i class="codicon codicon-type-hierarchy"></i>
-          <h2>Architecture Breakdown</h2>
-        </div>
+        <header class="header">
+          <div><h1>Architecture Governance</h1><p>Analyze your project. Define rules. Review conformance.</p></div>
+          <div id="backend-status" class="backend-status" role="status" aria-live="polite">AI Backend: Configuration pending</div>
+        </header>
+        <main>
         ${analysisFormHtml}
-        ${conformanceFormHtml}
         ${ruleFormHtml}
+        ${conformanceFormHtml}
+        </main>
         <script nonce="${nonce}">${ruleWebviewScript}</script>
       </body>
       </html>

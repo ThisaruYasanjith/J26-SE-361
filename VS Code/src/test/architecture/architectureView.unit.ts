@@ -1,7 +1,7 @@
 import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { ruleWebviewScript } from '../../architecture/architectureView';
+import { analysisFormHtml, architectureStyles, conformanceFormHtml, ruleFormHtml, ruleWebviewScript } from '../../architecture/architectureView';
 import { conformanceResponse, exampleViolation } from './conformanceFixtures';
 import { ActiveJavaFile, groupViolations } from '../../architecture/violationGrouping';
 
@@ -10,6 +10,7 @@ class Element {
   disabled = false;
   hidden = false;
   value = '';
+  className = '';
   children: Element[] = [];
   listeners = new Map<string, (event: unknown) => void>();
   set innerHTML(_value: string) { throw new Error('Backend text must not be inserted as HTML'); }
@@ -87,7 +88,8 @@ test('conflict cancellation leaves the rule unapproved and can be retried', () =
   const { element, receive } = view();
   receive({ type: 'conflicts', conflicts: { conflicts: [{ existing_rule_id: 'CUSTOM_001', reason: 'ONLY restriction' }] } });
   receive({ type: 'cancelled', canApprove: true });
-  assert.equal(element('conflicts').textContent, 'CUSTOM_001: ONLY restriction');
+  assert.equal(element('conflicts').children[0].children[0].textContent, 'CUSTOM_001');
+  assert.equal(element('conflicts').children[0].children[1].textContent, 'ONLY restriction');
   assert.match(element('rule-status').textContent, /has not been approved/);
   assert.equal(element('approve').disabled, false);
 });
@@ -299,4 +301,85 @@ test('stale results never reappear as current-file findings', () => {
   receive({ ...message, state: { status: 'stale', message: 'Context changed.' } });
   assert.equal(element('violation-list').children.length, 0);
   assert.match(element('conformance-status').textContent, /stale/);
+});
+
+test('initial cards have clear headings, no-project status and collapsed raw output', () => {
+  assert.ok(analysisFormHtml.includes('Project Architecture') && analysisFormHtml.includes('Analysis: Not analyzed'));
+  assert.ok(analysisFormHtml.includes('AI Context: Not synchronized') && analysisFormHtml.includes('Conformance: Not checked'));
+  assert.ok(ruleFormHtml.includes('AI Rule Definition') && ruleFormHtml.includes('Generate Rule'));
+  assert.ok(ruleFormHtml.includes('id="interpretation-card" class="interpretation-card" hidden'));
+  assert.ok(ruleFormHtml.includes('<details id="raw-output" hidden>') && !ruleFormHtml.includes('<details id="raw-output" open'));
+  assert.ok(conformanceFormHtml.includes('Architecture Conformance'));
+});
+test('project badges reflect analyzed, synchronized and deterministic conformance states', () => {
+  const { element, receive } = view();
+  receive({ type: 'analysis', state: { status: 'succeeded', summary: {
+    projectName: 'payments', componentCount: 7, relationshipCount: 15, contextPath: '/project/context.json',
+  } } });
+  receive({ type: 'contextSync', state: { status: 'synchronized', response: { project_name: 'payments', components: 7, relationships: 15 } },
+    canSync: true, syncing: false });
+  receive(groupedMessage());
+  assert.equal(element('analysis-badge').textContent, 'Analysis: Complete');
+  assert.equal(element('sync-badge').textContent, 'AI Context: Synchronized');
+  assert.equal(element('conformance-badge').textContent, 'Conformance: 1 violations');
+});
+test('generated interpretation uses readable fields and an explicit review badge', () => {
+  const { element, receive } = view();
+  receive({ type: 'proposal', response, canApprove: true });
+  assert.equal(element('interpretation-card').hidden, false);
+  assert.equal(element('rule-badge').textContent, 'Ready for review');
+  const values = element('interpretation').children.map(child => child.textContent);
+  assert.ok(values.includes('PaymentGateway (COMPONENT)') && values.includes('PROJECT'));
+  assert.ok(!values.some(value => value.includes('{"entity_type"')));
+});
+test('conflict cards preserve safe text and their confirmation action reuses host approval', () => {
+  const { element, receive, sent } = view();
+  receive({ type: 'proposal', response, canApprove: true });
+  receive({ type: 'conflicts', conflicts: { conflicts: [{ existing_rule_id: 'CUSTOM_001', reason: '<script>unsafe</script>' }] } });
+  assert.equal(element('conflict-card').hidden, false);
+  assert.equal(element('rule-badge').textContent, 'Conflict detected');
+  assert.equal(element('conflicts').children[0].children[1].textContent, '<script>unsafe</script>');
+  element('confirm-approval').fire('click');
+  assert.deepEqual(sent, [{ type: 'approve' }]);
+});
+test('conflict card cancellation never sends an approval or override request', () => {
+  const { element, receive, sent } = view();
+  receive({ type: 'proposal', response, canApprove: true });
+  receive({ type: 'conflicts', conflicts: { conflicts: [{ existing_rule_id: 'CUSTOM_001', reason: 'Restriction' }] } });
+  element('cancel-conflict').fire('click');
+  assert.equal(element('conflict-card').hidden, true);
+  assert.match(element('rule-status').textContent, /has not been approved/);
+  assert.deepEqual(sent, []);
+});
+test('the file link on a violation card uses existing ID-based navigation', () => {
+  const { element, receive, sent } = view();
+  receive(groupedMessage());
+  const link = element('violation-list').children[0].children[2];
+  assert.ok(link.textContent.includes('src/Example.java:1'));
+  link.fire('click');
+  assert.deepEqual(sent, [{ type: 'openViolation', violationId: exampleViolation.violation_id }]);
+});
+test('backend configuration display uses supplied host information without polling', () => {
+  const { element, receive, sent } = view();
+  receive({ type: 'backendStatus', configured: true, host: 'gpu.example' });
+  assert.equal(element('backend-status').textContent, 'AI Backend: Configured · gpu.example');
+  receive({ type: 'backendStatus', configured: false });
+  assert.equal(element('backend-status').textContent, 'AI Backend: Configuration required');
+  assert.deepEqual(sent, []);
+});
+test('approval and error states have distinct text badges and preserve error details', () => {
+  const { element, receive } = view();
+  receive({ type: 'approved', approval: { duplicate: false, rule_id: 'CUSTOM_001' } });
+  assert.equal(element('rule-badge').textContent, 'Approved');
+  receive({ type: 'approved', approval: { duplicate: true, rule_id: 'CUSTOM_001' } });
+  assert.equal(element('rule-badge').textContent, 'Duplicate rule');
+  receive({ type: 'error', message: 'Backend unavailable.', canApprove: false, errors: [{ path: 'rule', message: 'Invalid rule' }] });
+  assert.equal(element('rule-badge').textContent, 'Request failed');
+  assert.equal(element('validation-errors').hidden, false);
+  assert.equal(element('rule-status').textContent, 'Backend unavailable.');
+});
+test('styling supports narrow layouts and uses theme variables rather than fixed bright colors', () => {
+  assert.ok(architectureStyles.includes('@media (max-width: 440px)'));
+  assert.ok(architectureStyles.includes('--vscode-input-background') && architectureStyles.includes('--vscode-foreground'));
+  assert.ok(architectureStyles.includes(':focus-visible') && architectureStyles.includes('[hidden]'));
 });

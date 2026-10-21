@@ -52,7 +52,8 @@ def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBacken
         ContextDocumentBuilder(settings.base_rules_path, settings.custom_rules_path),
         embedder if embedder is not None else SentenceTransformerEmbedder(settings.embedding_model, settings.embedding_cache_dir),
     )
-    base_model = model if model is not None else QwenModelService(settings.model_id, settings.model_max_new_tokens)
+    base_model = model if model is not None else QwenModelService(
+        settings.model_id, settings.model_max_new_tokens, model_mode=settings.model_mode, adapter_path=settings.qlora_adapter_path)
     generator = RuleGenerationService(retriever, base_model, settings.rag_top_k)
     custom_rules = CustomRuleStore(settings.custom_rules_path, on_change=retriever.invalidate_index)
     conformance = ConformanceEngine(settings.base_rules_path, custom_rules)
@@ -146,7 +147,11 @@ def create_app(config: ServiceConfig | None = None, *, embedder: EmbeddingBacken
 
     @application.get("/model/status", response_model=ModelStatus)
     def model_status() -> ModelStatus:
-        return ModelStatus(loaded=base_model.is_loaded, model_id=base_model.model_id)
+        if isinstance(base_model, QwenModelService):
+            return base_model.status()
+        # Injected model backends used by tests keep the small existing inference protocol.
+        return ModelStatus(loaded=base_model.is_loaded, model_id=base_model.model_id, base_model=base_model.model_id,
+                           model_mode="BASE", adapter_loaded=False, device=None)
 
     @application.post("/rules/generate", response_model=RuleGenerationResponse)
     def generate_rule(request: RuleGenerationRequest) -> RuleGenerationResponse:

@@ -181,7 +181,7 @@ def model_libraries(monkeypatch):
 
 
 def test_model_load_is_lazy_reused_and_uses_fp16_nf4(model_libraries):
-    model = QwenModelService(max_new_tokens=180)
+    model = QwenModelService(max_new_tokens=180, model_mode="BASE")
     assert not model.is_loaded and model_libraries.models == []
     messages = [{"role": "user", "content": "Deny access."}]
     assert model.generate(messages) == '{"status":"VALID"}'
@@ -203,7 +203,7 @@ def test_model_load_is_lazy_reused_and_uses_fp16_nf4(model_libraries):
 
 def test_missing_cuda_fails_before_any_model_download(model_libraries):
     model_libraries.torch.cuda.is_available = lambda: False
-    model = QwenModelService()
+    model = QwenModelService(model_mode="BASE")
     with pytest.raises(InferenceError, match="CUDA-enabled PyTorch"):
         model.generate([])
     assert not model.is_loaded
@@ -217,7 +217,7 @@ def test_failed_model_load_can_be_retried(model_libraries):
         raise RuntimeError("Not enough device memory")
 
     model_libraries.transformers.AutoModelForCausalLM.from_pretrained = fail
-    model = QwenModelService()
+    model = QwenModelService(model_mode="BASE")
     with pytest.raises(InferenceError, match="Cannot load base model.*Not enough device memory"):
         model.generate([])
     assert not model.is_loaded
@@ -227,7 +227,7 @@ def test_failed_model_load_can_be_retried(model_libraries):
 
 
 def test_generation_failure_is_readable_and_keeps_the_model_loaded(model_libraries):
-    model = QwenModelService()
+    model = QwenModelService(model_mode="BASE")
     model.generate([])
 
     def fail(**kwargs):
@@ -249,7 +249,8 @@ def test_health_and_status_do_not_import_or_load_qwen(environment, monkeypatch):
         async with application.router.lifespan_context(application):
             assert await request_json(application, "/health", method="GET") == (200, {"status": "ok"})
             assert await request_json(application, "/model/status", method="GET") == (
-                200, {"loaded": False, "model_id": DEFAULT_MODEL_ID})
+                200, {"loaded": False, "model_id": DEFAULT_MODEL_ID, "base_model": DEFAULT_MODEL_ID,
+                      "model_mode": "QLORA", "adapter_loaded": False, "device": None})
             assert not application.state.rule_generator.model.is_loaded
 
     asyncio.run(check())
@@ -268,7 +269,8 @@ def test_endpoint_returns_raw_output_parsed_json_and_status_after_load(environme
             assert response["rule"]["status"] == "AMBIGUOUS"
             assert len(response["retrieved_context"]) == 8
             assert await request_json(application, "/model/status", method="GET") == (
-                200, {"loaded": True, "model_id": DEFAULT_MODEL_ID})
+                200, {"loaded": True, "model_id": DEFAULT_MODEL_ID, "base_model": DEFAULT_MODEL_ID,
+                      "model_mode": "BASE", "adapter_loaded": False, "device": None})
 
     asyncio.run(check())
 

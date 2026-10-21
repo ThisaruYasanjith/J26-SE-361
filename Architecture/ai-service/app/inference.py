@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 import threading
 import time
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import JsonValue, field_validator
 
@@ -16,6 +17,7 @@ from app.rule_validator import RULE_SCHEMA_PATH, RuleValidationIssue, RuleValida
 
 
 DEFAULT_MODEL_ID = "Qwen/Qwen3-4B-Instruct-2507"
+logger = logging.getLogger(__name__)
 
 
 class InferenceError(RuntimeError):
@@ -48,6 +50,10 @@ class RuleGenerationResponse(ArchitectureModel):
 class ModelStatus(ArchitectureModel):
     loaded: bool
     model_id: str
+    base_model: str
+    model_mode: Literal["BASE", "QLORA"]
+    adapter_loaded: bool
+    device: str | None
 
 
 def clean_json_output(text: str) -> str:
@@ -114,24 +120,59 @@ class RuleModelBackend(Protocol):
 
 
 class QwenModelService:
-    def __init__(self, model_id: str = DEFAULT_MODEL_ID, max_new_tokens: int = 180) -> None:
+    def __init__(self, model_id: str = DEFAULT_MODEL_ID, max_new_tokens: int = 180, *,
+                 model_mode: str = "QLORA", adapter_path: Path | None = None) -> None:
+        if model_mode not in {"BASE", "QLORA"}:
+            raise ValueError("MODEL_MODE must be BASE or QLORA.")
+        if model_mode == "BASE" and adapter_path is not None:
+            raise ValueError("BASE mode cannot ignore a configured QLoRA adapter.")
         self.model_id = model_id
+        self.model_mode = model_mode
+        self.adapter_path = Path(adapter_path).expanduser().resolve() if adapter_path is not None else None
         self.max_new_tokens = max_new_tokens
         self._tokenizer = None
         self._model = None
         self._lock = threading.Lock()
         self.load_time_seconds: float | None = None
         self.last_generation_time_seconds: float | None = None
+        logger.info("Rule generation configured in %s mode; weights load on first generation.", self.model_mode)
 
     @property
     def is_loaded(self) -> bool:
         return self._model is not None
+
+    def status(self) -> ModelStatus:
+        return ModelStatus(loaded=self.is_loaded, model_id=self.model_id, base_model=self.model_id,
+                           model_mode=self.model_mode, adapter_loaded=self.is_loaded and self.model_mode == "QLORA",
+                           device=str(self._model.device) if self.is_loaded else None)
+
+    def _check_adapter(self) -> Path | None:
+        if self.model_mode == "BASE":
+            return None
+        if self.adapter_path is None:
+            raise InferenceError("QLoRA mode requires QLORA_ADAPTER_PATH. Set MODEL_MODE=BASE only for intentional base-model inference.")
+        if not self.adapter_path.is_dir():
+            raise InferenceError("QLoRA adapter is configured but could not be loaded: the adapter directory does not exist.")
+        for filename in ("adapter_config.json", "adapter_model.safetensors"):
+            if not (self.adapter_path / filename).is_file():
+                raise InferenceError(f"QLoRA adapter is configured but could not be loaded: missing {filename}.")
+        try:
+            config = json.loads((self.adapter_path / "adapter_config.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise InferenceError("QLoRA adapter is configured but could not be loaded: invalid adapter_config.json.") from error
+        if not isinstance(config, dict) or config.get("base_model_name_or_path") != self.model_id:
+            raise InferenceError("QLoRA adapter is configured but could not be loaded: adapter base model does not match BASE_MODEL.")
+        if config.get("peft_type") != "LORA" or config.get("task_type") not in (None, "CAUSAL_LM"):
+            raise InferenceError("QLoRA adapter is configured but could not be loaded: expected a causal-language-model LoRA adapter.")
+        return self.adapter_path
 
     def _load(self) -> None:
         if self.is_loaded:
             return
         started = time.perf_counter()
         try:
+            # Validate local artifacts before importing GPU libraries or downloading the base weights.
+            adapter = self._check_adapter()
             # Neither the tokenizer nor model libraries are needed for health/status requests.
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -146,16 +187,35 @@ class QwenModelService:
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_compute_dtype=torch.float16,
             )
-            tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=False)
+            tokenizer_files = ("tokenizer_config.json", "tokenizer.json", "tokenizer.model", "vocab.json", "merges.txt",
+                               "special_tokens_map.json", "chat_template.jinja")
+            bundled_tokenizer = adapter is not None and any((adapter / name).is_file() for name in tokenizer_files)
+            tokenizer = AutoTokenizer.from_pretrained(
+                str(adapter) if bundled_tokenizer else self.model_id, trust_remote_code=False,
+                **({"local_files_only": True} if bundled_tokenizer else {}),
+            )
             model = AutoModelForCausalLM.from_pretrained(
                 self.model_id, quantization_config=quantization, device_map="auto",
                 dtype=torch.float16, trust_remote_code=False,
             )
+            if adapter is not None:
+                from peft import PeftModel
+
+                # Attach the saved adapter for inference; do not merge or retrain quantized weights.
+                model = PeftModel.from_pretrained(model, str(adapter), is_trainable=False,
+                                                   local_files_only=True, autocast_adapter_dtype=False)
             model.eval()
             # Publish both together so a failed load can be retried on the next request.
             self._tokenizer, self._model = tokenizer, model
             self.load_time_seconds = time.perf_counter() - started
+            logger.info("Loaded rule generator: mode=%s, adapter_loaded=%s, device=%s", self.model_mode,
+                        adapter is not None, model.device)
+        except InferenceError:
+            raise
         except Exception as error:
+            if self.model_mode == "QLORA":
+                logger.exception("QLoRA initialization failed; no base-model fallback is allowed.")
+                raise InferenceError("QLoRA adapter is configured but could not be loaded. Check CUDA, adapter/tokenizer files and backend logs.") from error
             raise InferenceError(f"Cannot load base model {self.model_id}: {error}") from error
 
     def generate(self, messages: list[dict[str, str]]) -> str:
@@ -179,7 +239,7 @@ class QwenModelService:
                 self.last_generation_time_seconds = time.perf_counter() - started
                 return text
             except Exception as error:
-                raise InferenceError(f"Base model generation failed: {error}") from error
+                raise InferenceError(f"{self.model_mode} model generation failed: {error}") from error
 
 
 class RuleGenerationService:

@@ -64,7 +64,7 @@ def test_real_base_qwen_with_rag():
             report["reason"] = "CUDA is unavailable in the installed PyTorch; no Qwen weights were downloaded or loaded."
             pytest.skip(report["reason"])
 
-        model = QwenModelService(config.model_id, config.model_max_new_tokens)
+        model = QwenModelService(config.model_id, config.model_max_new_tokens, model_mode="BASE")
         generator = RuleGenerationService(retriever, model, config.rag_top_k)
         report["device"] = torch.cuda.get_device_name(0)
         for record in report["results"]:
