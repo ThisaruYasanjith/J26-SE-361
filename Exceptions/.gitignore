@@ -1,0 +1,73 @@
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env
+.env.*
+
+# ============================================================
+# Large data — exclude from git
+# ============================================================
+# eBugs dataset (optional — decide if you want to track it)
+data/raw/
+data/processed/
+
+# Downloaded Java repositories
+repositories/
+repos/
+projects/
+
+# ============================================================
+# Model artifacts — exclude ALL subfolders
+# ============================================================
+models/**/*.pt
+models/**/*.pth
+models/**/*.bin
+models/**/*.ckpt
+models/**/*.safetensors
+
+# ============================================================
+# Results — track CSVs and figures, ignore caches
+# ============================================================
+# KEEP results/ tracked (the CSVs and figures are thesis deliverables)
+results/**/*.cache
+results/**/*.tmp
+
+# ============================================================
+# Temporary / generated files
+# ============================================================
+logs/
+tmp/
+temp/
+*.log
+record.json
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Java build artifacts
+target/
+build/
+out/
+*.class
+
+# Python build artifacts
+dist/
+*.egg-info/

@@ -1,0 +1,4 @@
+method,accuracy,macro_f1,weighted_f1
+Semantic-Only Model (GraphCodeBERT),0.9420,0.9149,0.9317
+Structural-Only Model (AST),0.7729,0.6726,0.7236
+Combined Model (GraphCodeBERT + AST),0.9275,0.9124,0.9313
