@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.pytest_cache/
+venv/
+.venv/
+
+# Large Model Weights & Checkpoints (>100MB)
+*.safetensors
+*.pt
+*.pth
+*.bin
+checkpoints/
+codet5-java-behavior-verified/
+codet5-java-behavior-v2/
+*.log

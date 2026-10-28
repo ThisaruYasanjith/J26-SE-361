@@ -1,0 +1,26 @@
+# Core Web UI & Local API
+streamlit>=1.36.0
+fastapi>=0.110.0
+uvicorn>=0.29.0
+
+# Deep Learning / Model Inference (Local Salesforce/codet5-small)
+torch>=2.0.0
+transformers>=4.40.0
+accelerate>=1.1.0
+safetensors>=0.4.0
+
+# HTTP and Networking
+requests>=2.31.0
+httpx>=0.27.0
+
+# Data Modeling and Validation
+pydantic>=2.7.0
+
+# Environment Configuration
+python-dotenv>=1.0.1
+
+# Java Parsing
+javalang>=0.13.0
+
+# Testing
+pytest>=8.2.0
